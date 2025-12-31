@@ -38,13 +38,13 @@ CR_KERNEL=$CR_DIR/arch/arm64/boot/Image
 # Compiled dtb by dtbtool
 CR_DTB=$CR_DIR/arch/arm64/boot/dtb.img
 # Kernel Name and Version
-CR_VERSION=V8.0
-CR_NAME=CronosKernel
+CR_VERSION=V2.0
+CR_NAME=RafitaChan
 # Thread count
 CR_JOBS=$(nproc --all)
 # Target Android version
-CR_ANDROID=q
-CR_PLATFORM=10
+CR_ANDROID=p
+CR_PLATFORM=9.0.0
 # Target ARCH
 CR_ARCH=arm64
 # Current Date
@@ -78,7 +78,7 @@ CR_KSU="n"
 CR_CLEAN="n"
 # Default to OneUI-Q
 CR_CONFIG_VAR=$CR_CONFIG_ONEUI
-CR_DTB_MOUNT=$CR_DTS_ONEUI
+CR_DTB_MOUNT=$CR_DTS_TREBLE
 CR_RAMDISK=$CR_RAMDISK_Q
 CR_HALLIC="1"
 # Compiler Paths
@@ -590,4 +590,3 @@ fi
 #     CR_IMAGE_NAME=$CR_IMAGE_NAME-KernelSU
 #fi
 #}
-
