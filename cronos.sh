@@ -38,7 +38,7 @@ CR_KERNEL=$CR_DIR/arch/arm64/boot/Image
 # Compiled dtb by dtbtool
 CR_DTB=$CR_DIR/arch/arm64/boot/dtb.img
 # Kernel Name and Version
-CR_VERSION=V2.0
+CR_VERSION=V5.84
 CR_NAME=RafitaChan
 # Thread count
 CR_JOBS=$(nproc --all)
@@ -208,7 +208,7 @@ BUILD_GENERATE_CONFIG()
   fi
   # Legacy modem required when targeting the original Note 7
   if [ $CR_BOMB = "1" ]; then
-    echo " Legacy BOMB Edition RIL"
+    echo " Legacy N7 Edition RIL"
 	sed -i -- '/CONFIG_MODEM_PIE_REV/d' $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
     echo "# CONFIG_MODEM_PIE_REV is not set" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
   fi
