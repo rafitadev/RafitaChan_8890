@@ -526,7 +526,7 @@ echo "$CR_NAME $CR_VERSION Build Script $CR_DATE"
 if [ "$1" = "-d" ]; then
 BUILD_DEBUG
 fi
-echo " "
+echo " " SukiSu Ultra Adapted
 echo " "
 echo "1) herolte" "2) hero2lte" "3) gracerlte" "4) gracelte" 
 echo  " "
@@ -550,7 +550,7 @@ echo "1) Selinux Permissive " "2) Selinux Enforcing"
 echo " "
 read -p "Please select your SElinux mode (1-2) > " CR_SELINUX
 echo " "
-read -p "Enable KernelSU? (y/n) > " CR_KSU
+read -p "Enable SuKIsu Ultra(maybe no works (y/n) > " CR_KSU
 echo " "
 if [ "$CR_TARGET" = "6" ]; then
 echo "Build Aborted"
