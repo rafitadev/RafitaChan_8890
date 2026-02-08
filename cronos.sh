@@ -550,7 +550,7 @@ echo "1) Selinux Permissive " "2) Selinux Enforcing"
 echo " "
 read -p "Please select your SElinux mode (1-2) > " CR_SELINUX
 echo " "
-read -p "Enable SuKIsu Ultra(maybe no works (y/n) > " CR_KSU
+read -p "Enable SuKIsu Ultra(maybe no works) (y/n) > " CR_KSU
 echo " "
 if [ "$CR_TARGET" = "6" ]; then
 echo "Build Aborted"
@@ -585,7 +585,7 @@ fi
 #{
 #if [ $CR_ROOT = 1 ]; then
 #     echo " "
-#     echo " WARNING : KernelSU Enabled!"
+#     echo " WARNING : KernelSU Enabled And SuKisu Ultra!"
 #     mv $CR_PRODUCT/$CR_IMAGE_NAME.img $CR_PRODUCT/$CR_IMAGE_NAME-KernelSU.img
 #     CR_IMAGE_NAME=$CR_IMAGE_NAME-KernelSU
 #fi
