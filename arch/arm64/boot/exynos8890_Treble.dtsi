@@ -123,16 +123,16 @@
 		#size-cells = <0>;
 
 		hmp {
-			up_threshold = <524>;
-			down_threshold = <214>;
-			semiboost_up_threshold = <254>;
-			semiboost_down_threshold = <163>;
+			up_threshold = <420>;
+			down_threshold = <180>;
+			semiboost_up_threshold = <200>;
+			semiboost_down_threshold = <130>;
 			bootboost-duration-us = <40000000>;
 
 			down_compensation_timeout = <30>;		/* ms */
-			down_compensation_high_freq = <1170000>;	/* min qos lock for little cpu */
-			down_compensation_mid_freq = <962000>;		/* min qos lock for little cpu */
-			down_compensation_low_freq = <858000>;		/* min qos lock for little cpu */
+			down_compensation_high_freq = <1586000>;	/* min qos lock for little cpu */
+			down_compensation_mid_freq = <1274000>;		/* min qos lock for little cpu */
+			down_compensation_low_freq = <1066000>;		/* min qos lock for little cpu */
 		};
 
 		cpu@100 {
@@ -429,28 +429,28 @@
 		cl0_boot_max_qos = <1586000>;
 		cl0_boot_min_qos = <1586000>;
 		cl0_en_ema = <1>;
-		cl0_min_qos_freq = <858000>;
+		cl0_min_qos_freq = <1274000>;
 
 		/* MNGS */
-		cl1_idx_num = <28>;
-		cl1_max_support_idx = <7>;
-		cl1_min_support_idx = <27>;
-		cl1_boot_max_qos = <2288000>;
-		cl1_boot_min_qos = <2288000>;
+		cl1_idx_num = <26>;
+		cl1_max_support_idx = <0>;
+		cl1_min_support_idx = <24>;
+		cl1_boot_max_qos = <2600000>;
+		cl1_boot_min_qos = <2600000>;
 		cl1_en_ema = <1>;
 		cl1_en_smpl = <1>;
 		cl1_jig_boot_max_qos = <1456000>;
 		cl1_reboot_limit_freq = <728000>;
-		cl1_min_qos_freq = <728000>;
-		cl1_boost_freq = <2288000>;
-		cl1_max_support_idx_table = < 7	   /* Number of online core is 0 */
-					      4    /* Number of online core is 1 */
-					      4    /* Number of online core is 2 */
-					      7    /* Number of online core is 3 */
-					      7 >; /* Number of online core is 4 */
+		cl1_min_qos_freq = <1456000>;
+		cl1_boost_freq = <2704000>;
+		cl1_max_support_idx_table = < 0	   /* Number of online core is 0 */
+					      0    /* Number of online core is 1 */
+					      0    /* Number of online core is 2 */
+					      0    /* Number of online core is 3 */
+					      0 >; /* Number of online core is 4 */
 
 		/* Boost freq*/
-		cl0_boost_freq = <754000>;
+		cl0_boost_freq = <1274000>;
 
 		/*APO table ->	 idx   freq    volt   bus_lock */
 		cl0_dvfs_domain_name = "dvfs_little";
@@ -476,34 +476,31 @@
 
 		/*MNGS table ->	 idx  freq    volt   bus_lock */
 		cl1_dvfs_domain_name = "dvfs_big";
-		cl1_dvfs_table = < 0 3000000 1137500   1794000 /* ARM L0: 3.0GHz  */
-				   1 2900000 1137500   1794000 /* ARM L1: 2.9GMHz */
-				   2 2800000 1137500   1794000 /* ARM L2: 2.8GMHz */
-				   3 2700000 1137500   1794000 /* ARM L3: 2.7GHz  */
-				   4 2600000 1137500   1794000 /* ARM L4: 2.6GHz  */
-				   5 2496000 1137500   1716000 /* ARM L5: 2.5GHz  */
-				   6 2392000 1268750   1716000 /* ARM L6: 2.4GHz  */
-				   7 2288000 1187500   1716000 /* ARM L7: 2.3GHz  */
-				   8 2184000 1131250   1539000 /* ARM L8: 2.2GHz  */
-				   9 2080000 1081250   1539000 /* ARM L9: 2.1GHz  */
-				  10 1976000 1037500   1352000 /* ARM L10: 2.0GHz */
-				  11 1872000 1000000   1144000 /* ARM L11: 1.9GHz */
-				  12 1768000  962500   1144000 /* ARM L12: 1.8GHz */
-				  13 1664000  931250   1014000 /* ARM L13: 1.7GHz */
-				  14 1560000  900000   1014000 /* ARM L14: 1.6GHz */
-				  15 1456000  868750    845000 /* ARM L15: 1.5GHz */
-				  16 1352000  843750    845000 /* ARM L16: 1.4MHz */
-				  17 1248000  837500    676000 /* ARM L17: 1.3MHz */
-				  18 1144000  837500    546000 /* ARM L18: 1.2MHz */
-				  19 1040000  837500    546000 /* ARM L19: 1.0MHz */
-				  20  936000  837500    421000 /* ARM L20: 900MHz */
-				  21  832000  837500    421000 /* ARM L21: 800MHz */
-				  22  728000  837500    421000 /* ARM L22: 700MHz */
-				  23  624000  837500       0   /* ARM L23: 600MHz */
-				  24  520000  837500       0   /* ARM L23: 500MHz */
-				  25  416000  837500       0   /* ARM L23: 400MHz */
-				  26  312000  837500       0   /* ARM L23: 300MHz */
-				  27  208000  837500       0 >;/* ARM L23: 200MHz */
+		cl1_dvfs_table = < 0 2704000 1187500   1794000 /* ARM L0: 2.704GHz */
+				   1 2600000 1137500   1794000 /* ARM L1: 2.6GHz   */
+				   2 2496000 1137500   1716000 /* ARM L2: 2.5GHz   */
+				   3 2392000 1268750   1716000 /* ARM L3: 2.4GHz   */
+				   4 2288000 1187500   1716000 /* ARM L4: 2.3GHz   */
+				   5 2184000 1131250   1539000 /* ARM L5: 2.2GHz   */
+				   6 2080000 1081250   1539000 /* ARM L6: 2.1GHz   */
+				   7 1976000 1037500   1352000 /* ARM L7: 2.0GHz   */
+				   8 1872000 1000000   1144000 /* ARM L8: 1.9GHz   */
+				   9 1768000  962500   1144000 /* ARM L9: 1.8GHz   */
+				  10 1664000  931250   1014000 /* ARM L10: 1.7GHz  */
+				  11 1560000  900000   1014000 /* ARM L11: 1.6GHz  */
+				  12 1456000  868750    845000 /* ARM L12: 1.5GHz  */
+				  13 1352000  843750    845000 /* ARM L13: 1.4MHz  */
+				  14 1248000  837500    676000 /* ARM L14: 1.3MHz  */
+				  15 1144000  837500    546000 /* ARM L15: 1.2MHz  */
+				  16 1040000  837500    546000 /* ARM L16: 1.0MHz  */
+				  17  936000  837500    421000 /* ARM L17: 900MHz  */
+				  18  832000  837500    421000 /* ARM L18: 800MHz  */
+				  19  728000  837500    421000 /* ARM L19: 700MHz  */
+				  20  624000  837500       0   /* ARM L20: 600MHz  */
+				  21  520000  837500       0   /* ARM L21: 500MHz  */
+				  22  416000  837500       0   /* ARM L22: 400MHz  */
+				  23  312000  837500       0   /* ARM L23: 300MHz  */
+				  24  208000  837500       0 >;/* ARM L24: 200MHz  */
 	};
 
   firmware {
