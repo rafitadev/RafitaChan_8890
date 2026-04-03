@@ -18,6 +18,8 @@
 
 # Main Dir
 CR_DIR=$(pwd)
+# Out-of-tree kernel build directory (requested: O=../out)
+CR_BUILD_OUT=$CR_DIR/../out
 # Define proper arch and dir for dts files
 CR_DTS=arch/arm64/boot/dts
 CR_DTS_TREBLE=arch/arm64/boot/exynos8890_Treble.dtsi
@@ -33,10 +35,14 @@ CR_AIK=$CR_DIR/Cronos/A.I.K
 # Main Ramdisk Location
 CR_RAMDISK=$CR_DIR/Cronos/Ramdisk
 CR_RAMDISK_Q=$CR_DIR/Cronos/Q
-# Compiled image name and location (Image/zImage)
-CR_KERNEL=$CR_DIR/arch/arm64/boot/Image
-# Compiled dtb by dtbtool
-CR_DTB=$CR_DIR/arch/arm64/boot/dtb.img
+# Compiled image name and location (out-of-tree)
+CR_KERNEL=$CR_BUILD_OUT/arch/arm64/boot/Image
+# Compiled dtb by dtbtool (out-of-tree)
+CR_DTB=$CR_BUILD_OUT/arch/arm64/boot/dtb.img
+# SuKIsu Ultra upstream patch sources (official)
+CR_SUKISU_BASE_REPO="https://github.com/SukiSU-Ultra/SukiSU_patch"
+CR_SUKISU_KP_REPO="https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch"
+CR_SUKISU_CACHE="$CR_DIR/.sukisu_upstream"
 # Kernel Name and Version
 CR_VERSION=V5.84
 CR_NAME=RafitaChan
@@ -95,29 +101,29 @@ BUILD_COMPILER()
 {
 if [ $CR_COMPILER = "1" ]; then
 export CROSS_COMPILE=$CR_GCC4
-compile="make"
+compile="make O=$CR_BUILD_OUT"
 CR_COMPILER="$CR_GCC4"
 fi
 if [ $CR_COMPILER = "2" ]; then
 export CROSS_COMPILE=$CR_LINARO
-compile="make"
+compile="make O=$CR_BUILD_OUT"
 CR_COMPILER="$CR_LINARO"
 fi
 if [ $CR_COMPILER = "3" ]; then
 export CROSS_COMPILE=$CR_GCC9
-compile="make"
+compile="make O=$CR_BUILD_OUT"
 CR_COMPILER="$CR_GCC9"
 fi
 if [ $CR_COMPILER = "4" ]; then
 export CROSS_COMPILE=$CR_GCC12
-compile="make"
+compile="make O=$CR_BUILD_OUT"
 CR_COMPILER="$CR_GCC12"
 fi
 if [ $CR_COMPILER = "5" ]; then
 export CLANG_PATH=$CR_CLANG
 export CROSS_COMPILE=$CR_GCC11
 export CLANG_TRIPLE=aarch64-linux-gnu-
-compile="make CC=clang ARCH=arm64"
+compile="make O=$CR_BUILD_OUT CC=clang ARCH=arm64"
 export PATH=${CLANG_PATH}:${PATH}
 CR_COMPILER="$CR_CLANG"
 fi
@@ -133,26 +139,28 @@ if [ $CR_CLEAN = "y" ]; then
      $compile clean && $compile mrproper
      rm -r -f $CR_DTB
      rm -r -f $CR_KERNEL
-     rm -rf $CR_DTS/.*.tmp
-     rm -rf $CR_DTS/.*.cmd
-     rm -rf $CR_DTS/*.dtb
-     rm -rf $CR_DIR/.config
-     rm -rf $CR_DTS/exynos8890.dtsi
-     rm -rf $CR_OUT/*.img
-     rm -rf $CR_OUT/*.zip
+	     rm -rf $CR_DTS/.*.tmp
+	     rm -rf $CR_DTS/.*.cmd
+	     rm -rf $CR_DTS/*.dtb
+	     rm -rf $CR_DIR/.config
+	     rm -rf $CR_BUILD_OUT/.config
+	     rm -rf $CR_DTS/exynos8890.dtsi
+	     rm -rf $CR_OUT/*.img
+	     rm -rf $CR_OUT/*.zip
 fi
 if [ $CR_CLEAN = "n" ]; then
      echo " "
      echo " Skip Full cleaning"
      rm -r -f $CR_DTB
      rm -r -f $CR_KERNEL
-     rm -rf $CR_DTS/.*.tmp
-     rm -rf $CR_DTS/.*.cmd
-     rm -rf $CR_DTS/*.dtb
-     rm -rf $CR_DIR/.config
-     rm -rf $CR_DIR/.version
-     rm -rf $CR_DTS/exynos8890.dtsi
-fi
+	     rm -rf $CR_DTS/.*.tmp
+	     rm -rf $CR_DTS/.*.cmd
+	     rm -rf $CR_DTS/*.dtb
+	     rm -rf $CR_DIR/.config
+	     rm -rf $CR_BUILD_OUT/.config
+	     rm -rf $CR_DIR/.version
+	     rm -rf $CR_DTS/exynos8890.dtsi
+	fi
 }
 
 
@@ -213,15 +221,61 @@ BUILD_GENERATE_CONFIG()
     echo "# CONFIG_MODEM_PIE_REV is not set" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
   fi
   if [ $CR_KSU = "y" ]; then
-    echo " Building KernelSU Kernel"
+    echo " Building SuKIsu Ultra Kernel"
     echo "CONFIG_KSU=y" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
-    CR_IMAGE_NAME=$CR_IMAGE_NAME-ksu
-    zver=$zver-KernelSU
+    CR_IMAGE_NAME=$CR_IMAGE_NAME-sukisu
+    zver=$zver-SuKIsuUltra
   else
     echo "# CONFIG_KSU is not set" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
   fi
   echo " Set $CR_VARIANT to generated config "
   CR_CONFIG=tmp_defconfig
+}
+
+# SuKIsu Ultra integration (official repos + in-tree patcher)
+INTEGRATE_SUKISU_ULTRA()
+{
+  if [ "$CR_KSU" != "y" ]; then
+    echo " SuKIsu Ultra disabled; skipping integration step."
+    return
+  fi
+
+  echo "----------------------------------------------"
+  echo " Integrating SuKIsu Ultra (official sources)"
+  echo "----------------------------------------------"
+
+  mkdir -p "$CR_SUKISU_CACHE"
+
+  # Idempotent fetch: clone once, then pull updates.
+  if [ ! -d "$CR_SUKISU_CACHE/SukiSU_patch/.git" ]; then
+    git clone --depth=1 "$CR_SUKISU_BASE_REPO" "$CR_SUKISU_CACHE/SukiSU_patch" || {
+      echo " WARNING: failed to clone SukiSU_patch; continuing with local in-tree patcher."
+    }
+  else
+    (cd "$CR_SUKISU_CACHE/SukiSU_patch" && git pull --ff-only) || true
+  fi
+
+  if [ ! -d "$CR_SUKISU_CACHE/SukiSU_KernelPatch_patch/.git" ]; then
+    git clone --depth=1 "$CR_SUKISU_KP_REPO" "$CR_SUKISU_CACHE/SukiSU_KernelPatch_patch" || {
+      echo " WARNING: failed to clone SukiSU_KernelPatch_patch; continuing with local in-tree patcher."
+    }
+  else
+    (cd "$CR_SUKISU_CACHE/SukiSU_KernelPatch_patch" && git pull --ff-only) || true
+  fi
+
+  # Apply 3.x-safe direct tree modifications using local integrator.
+  if [ -x "$CR_DIR/integrate_sukisu_ultra.sh" ]; then
+    ENABLE_SUSFS=0 ENABLE_BPF=1 RUN_OLDDEF=1 SKIP_BUILD=1 \
+      bash "$CR_DIR/integrate_sukisu_ultra.sh" "$CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig" || {
+      echo " ERROR: SuKIsu Ultra integration failed."
+      exit 1
+    }
+  else
+    echo " ERROR: integrate_sukisu_ultra.sh not found or not executable."
+    exit 1
+  fi
+
+  echo " SuKIsu Ultra integration complete."
 }
 
 # Kernel information Function
@@ -245,6 +299,7 @@ BUILD_ZIMAGE()
 	echo " "
 	echo "Building zImage for $CR_VARIANT"
 	export LOCALVERSION=-$CR_IMAGE_NAME
+	mkdir -p "$CR_BUILD_OUT"
   	cp $CR_DTB_MOUNT $CR_DTS/exynos8890.dtsi
 	echo "Make $CR_CONFIG"
 	$compile $CR_CONFIG
@@ -391,6 +446,7 @@ BUILD(){
 	#BUILD_VAR
 	BUILD_IMAGE_NAME
 	BUILD_GENERATE_CONFIG
+	INTEGRATE_SUKISU_ULTRA
 	BUILD_ZIMAGE
 	BUILD_DTB
 	if [ "$CR_MKZIP" = "y" ]; then # Allow Zip Package for mass compile only
@@ -550,7 +606,7 @@ echo "1) Selinux Permissive " "2) Selinux Enforcing"
 echo " "
 read -p "Please select your SElinux mode (1-2) > " CR_SELINUX
 echo " "
-read -p "Enable SuKIsu Ultra(maybe no works) (y/n) > " CR_KSU
+read -p "Do you want to enable SuKIsu Ultra? (y/n) > " CR_KSU
 echo " "
 if [ "$CR_TARGET" = "6" ]; then
 echo "Build Aborted"

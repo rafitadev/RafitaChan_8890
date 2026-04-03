@@ -341,6 +341,7 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
 	unsigned int lookup_flags = LOOKUP_FOLLOW;
 	
 #if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+	/* KernelSU manual hook point (3.x safe): access check interception site. */
 	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
 #endif
 

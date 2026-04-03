@@ -99,6 +99,7 @@ int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,
 	unsigned int lookup_flags = 0;
 	
 #if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+	/* KernelSU manual hook point (3.x safe): stat path interception site. */
 	ksu_handle_stat(&dfd, &filename, &flag);
 #endif
 

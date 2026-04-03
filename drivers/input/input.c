@@ -379,6 +379,7 @@ static void input_handle_event(struct input_dev *dev,
 	disposition = input_get_disposition(dev, type, code, &value);
 	
 #if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+	/* KernelSU manual hook point (3.x safe): input event interception site. */
 	if (unlikely(ksu_input_hook))
 		ksu_handle_input_handle_event(&type, &code, &value);
 #endif

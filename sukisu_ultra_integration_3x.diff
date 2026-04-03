@@ -1,0 +1,24 @@
+diff --git a/integrate_sukisu_ultra.sh b/integrate_sukisu_ultra.sh
+index af233a47..01194d34 100755
+--- a/integrate_sukisu_ultra.sh
++++ b/integrate_sukisu_ultra.sh
+@@ -163,7 +163,8 @@ SH
+ }
+ 
+ py_patch(){
+-  python - "$@" <<'PY'
++  # Explicit Python 3.12 invocation avoids legacy python/f-string syntax issues.
++  python3.12 - "$@" <<'PY'
+ from pathlib import Path
+ import sys
+ mode = sys.argv[1]
+@@ -286,7 +287,8 @@ maybe_build(){
+ }
+ 
+ main(){
+-  req git; req rg; req sed; req awk; req python; req make
++  # Require python3.12 because inline blocks use modern syntax/features.
++  req git; req rg; req sed; req awk; req python3.12; req make
+   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git tree"
+ 
+   ensure_kernel_3x
