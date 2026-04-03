@@ -26,6 +26,8 @@ struct pwrcal_clk *div_type_list[NUM_OF_DIV_TYPE];
 struct pwrcal_clk *gate_type_list[NUM_OF_GATE_TYPE];
 
 #define ADD_CLK_TO_LIST(to, x)	to[clk_##x.clk.id & 0xFFF] = &(clk_##x.clk)
+#define EXYNOS8890_BIG_OC_RATE_HZ	3020000000UL
+#define EXYNOS8890_BIG_BASE_RATE_HZ	2700000000UL
 
 CLK_PLL(14160,	MNGS_PLL,	0,	MNGS_PLL_LOCK,	MNGS_PLL_CON0,	NULL,	MNGS_MUX_MNGS_PLL,	&pll141xx_ops);
 CLK_PLL(14170,	APOLLO_PLL,	0,	APOLLO_PLL_LOCK,	APOLLO_PLL_CON0,	NULL,	APOLLO_MUX_APOLLO_PLL,	&pll141xx_ops);
@@ -2156,6 +2158,7 @@ struct pwrcal_clk *clk_find(char *clk_name)
 void clk_pll_set_rate_table(struct pwrcal_pll *pll)
 {
 	int i;
+	int alloc_count;
 	void *pll_block;
 	struct pwrcal_pll_rate_table *pll_rate_table;
 	struct ect_pll *pll_unit;
@@ -2172,7 +2175,11 @@ void clk_pll_set_rate_table(struct pwrcal_pll *pll)
 	if (pll_unit == NULL)
 		return;
 
-	pll_rate_table = kzalloc(sizeof(struct pwrcal_pll_rate_table) * pll_unit->num_of_frequency, GFP_KERNEL);
+	alloc_count = pll_unit->num_of_frequency;
+	if (pll->clk.id == APOLLO_PLL || pll->clk.id == MNGS_PLL)
+		alloc_count += 1;
+
+	pll_rate_table = kzalloc(sizeof(struct pwrcal_pll_rate_table) * alloc_count, GFP_KERNEL);
 	if (pll_rate_table == NULL)
 		return;
 
@@ -2186,8 +2193,28 @@ void clk_pll_set_rate_table(struct pwrcal_pll *pll)
 		pll_rate_table[i].kdiv = pll_frequency->k;
 	}
 
+	if (alloc_count > pll_unit->num_of_frequency && pll_unit->num_of_frequency > 0) {
+		struct pwrcal_pll_rate_table *oc_entry = &pll_rate_table[pll_unit->num_of_frequency];
+		struct pwrcal_pll_rate_table *base_entry = &pll_rate_table[pll_unit->num_of_frequency - 1];
+		unsigned long long scaled_mdiv;
+
+		*oc_entry = *base_entry;
+		oc_entry->rate = EXYNOS8890_BIG_OC_RATE_HZ;
+		/*
+		 * Keep pdiv/sdiv/kdiv from the top validated step (2.70GHz)
+		 * and scale mdiv to synthesize a 3.02GHz PLL point.
+		 */
+		scaled_mdiv = ((unsigned long long)base_entry->mdiv * EXYNOS8890_BIG_OC_RATE_HZ)
+			+ (EXYNOS8890_BIG_BASE_RATE_HZ / 2);
+		do_div(scaled_mdiv, EXYNOS8890_BIG_BASE_RATE_HZ);
+		oc_entry->mdiv = (unsigned int)scaled_mdiv;
+
+		pr_info("OC PLL ACTIVE: 3020000000 (%s mdiv %u -> %u)\n",
+			pll->clk.name, base_entry->mdiv, oc_entry->mdiv);
+	}
+
 	pll->rate_table = pll_rate_table;
-	pll->rate_count = pll_unit->num_of_frequency;
+	pll->rate_count = alloc_count;
 }
 
 void clk_init(void)

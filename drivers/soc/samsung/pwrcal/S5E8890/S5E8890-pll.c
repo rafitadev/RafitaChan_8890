@@ -36,8 +36,17 @@
 #define PLL1431X_BYPASS			4
 
 #define FIN_HZ_26M		(26*MHZ)
+#define EXYNOS8890_BIG_OC_RATE_HZ	3020000000ULL
 
 static int mfc_pll_refcount[2] = {1, 1};
+
+static bool exynos8890_is_big_pll(const struct pwrcal_clk *clk)
+{
+	if (!clk || !clk->name)
+		return false;
+
+	return !strcmp(clk->name, "APOLLO_PLL") || !strcmp(clk->name, "MNGS_PLL");
+}
 
 static const struct pwrcal_pll_rate_table *_clk_get_pll_settings(
 					struct pwrcal_pll *pll_clk,
@@ -409,6 +418,8 @@ static int _clk_pll141xx_set_rate(struct pwrcal_clk *clk,
 			goto errorout;
 
 		if (_clk_pll141xx_find_pms(pll_spec, &tmp_rate_table, rate)) {
+			if (rate == EXYNOS8890_BIG_OC_RATE_HZ && exynos8890_is_big_pll(clk))
+				pr_err("OC PLL FAILURE: %s cannot synthesize %lluHz\n", clk->name, rate);
 			pr_err("can't find pms value for rate(%lldHz) of \'%s\'",
 				rate,
 				clk->name);
@@ -425,8 +436,11 @@ static int _clk_pll141xx_set_rate(struct pwrcal_clk *clk,
 				clk->name);
 	}
 
-	if (_clk_pll141xx_set_pms(clk, rate_table))
+	if (_clk_pll141xx_set_pms(clk, rate_table)) {
+		if (rate == EXYNOS8890_BIG_OC_RATE_HZ && exynos8890_is_big_pll(clk))
+			pr_err("OC PLL FAILURE: %s cannot set PMS at %lluHz\n", clk->name, rate);
 		goto errorout;
+	}
 
 	if (rate != 0) {
 		if (_clk_pll141xx_is_enabled(clk) == 0)

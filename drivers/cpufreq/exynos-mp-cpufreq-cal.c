@@ -27,6 +27,11 @@
 #include "../../drivers/soc/samsung/pwrcal/pwrcal.h"
 #include "../../drivers/soc/samsung/pwrcal/S5E8890/S5E8890-vclk.h"
 
+#define EXYNOS8890_BIG_OC_FREQ_KHZ	3020000U
+#define EXYNOS8890_BIG_OC_VOLT_UV	1325000U
+#define EXYNOS8890_BIG_OC_MAX_SAFE_VOLT_UV	1350000U
+#define VOLT_RANGE_STEP			25000
+
 #ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
 #include <linux/sec_debug.h>
 #endif
@@ -73,9 +78,30 @@ static void exynos_mp_cpufreq_cl0_set_ema(unsigned int volt)
 static void exynos_mp_cpufreq_cl1_set_freq(unsigned int old_index,
 		unsigned int new_index)
 {
-	if (cal_dfs_set_rate(dvfs_big,
-		(unsigned long)exynos_info[CL_ONE]->freq_table[new_index].frequency) < 0)
+	unsigned long target_khz = (unsigned long)exynos_info[CL_ONE]->freq_table[new_index].frequency;
+	unsigned int active_khz;
+
+	if (cal_dfs_set_rate(dvfs_big, target_khz) < 0) {
+		if (target_khz >= EXYNOS8890_BIG_OC_FREQ_KHZ &&
+			exynos_info[CL_ONE]->regulator) {
+			unsigned int boost_uv = EXYNOS8890_BIG_OC_MAX_SAFE_VOLT_UV;
+
+			pr_warn("CL1 OC rate retry: %luKHz with %uuV\n", target_khz, boost_uv);
+			regulator_set_voltage(exynos_info[CL_ONE]->regulator,
+					boost_uv, boost_uv + VOLT_RANGE_STEP);
+			exynos_info[CL_ONE]->cur_volt = boost_uv;
+			if (cal_dfs_set_rate(dvfs_big, target_khz) == 0)
+				return;
+		}
 		pr_err("CL1 : failed to set_freq(%d -> %d)\n",old_index, new_index);
+	}
+
+	active_khz = (unsigned int)cal_dfs_get_rate(dvfs_big);
+	pr_info("CL1 runtime verify: target=%luKHz active=%uKHz\n",
+		target_khz, active_khz);
+	if (target_khz == EXYNOS8890_BIG_OC_FREQ_KHZ &&
+		active_khz < EXYNOS8890_BIG_OC_FREQ_KHZ)
+		pr_err("CL1 runtime verify: hardware did not reach 3020000KHz\n");
 }
 
 static void exynos_mp_cpufreq_cl1_set_ema(unsigned int volt)
@@ -191,6 +217,7 @@ static void exynos_mp_cpufreq_set_cal_ops(cluster_type cluster)
 static int exynos_mp_cpufreq_init_cal_table(cluster_type cluster)
 {
 	int table_size, cl_id, i;
+	int table_offset = 0;
 	struct dvfs_rate_volt *ptr_temp_table;
 	struct exynos_dvfs_info *ptr = exynos_info[cluster];
 	unsigned int cal_max_freq;
@@ -214,9 +241,16 @@ static int exynos_mp_cpufreq_init_cal_table(cluster_type cluster)
 	table_size = cal_dfs_get_rate_asv_table(cl_id, ptr_temp_table);
 
 	if (ptr->max_idx_num != table_size) {
-		pr_err("%s: DT is not matched cal table size\n", __func__);
-		kfree(ptr_temp_table);
-		return -EINVAL;
+		if (cluster == CL_ONE &&
+			ptr->max_idx_num == table_size + 1 &&
+			ptr->freq_table[0].frequency == EXYNOS8890_BIG_OC_FREQ_KHZ) {
+			table_offset = 1;
+			ptr->volt_table[0] = EXYNOS8890_BIG_OC_VOLT_UV;
+		} else {
+			pr_err("%s: DT is not matched cal table size\n", __func__);
+			kfree(ptr_temp_table);
+			return -EINVAL;
+		}
 	}
 
 	cal_max_freq = cal_dfs_get_max_freq(cl_id);
@@ -226,20 +260,22 @@ static int exynos_mp_cpufreq_init_cal_table(cluster_type cluster)
 		return -EINVAL;
 	}
 
-	for (i = 0; i< ptr->max_idx_num; i++) {
-		if (ptr->freq_table[i].frequency != (unsigned int)ptr_temp_table[i].rate) {
+	for (i = 0; i < table_size; i++) {
+		unsigned int idx = i + table_offset;
+
+		if (ptr->freq_table[idx].frequency != (unsigned int)ptr_temp_table[i].rate) {
 			pr_err("%s: DT is not matched cal frequency_table(dt : %d, cal : %d\n",
-					__func__, ptr->freq_table[i].frequency,
+					__func__, ptr->freq_table[idx].frequency,
 					(unsigned int)ptr_temp_table[i].rate);
 			kfree(ptr_temp_table);
 			return -EINVAL;
 		} else {
 			/* copy cal voltage to cpufreq driver voltage table */
-			ptr->volt_table[i] = ptr_temp_table[i].volt;
+			ptr->volt_table[idx] = ptr_temp_table[i].volt;
 		}
 
 		if (ptr_temp_table[i].rate == cal_max_freq)
-			cal_max_support_idx = i;
+			cal_max_support_idx = idx;
 	}
 
 	pr_info("CPUFREQ of %s CAL max_freq %lu KHz, DT max_freq %lu\n",
@@ -247,8 +283,12 @@ static int exynos_mp_cpufreq_init_cal_table(cluster_type cluster)
 			ptr_temp_table[cal_max_support_idx].rate,
 			ptr_temp_table[ptr->max_support_idx].rate);
 
-	if (ptr->max_support_idx < cal_max_support_idx)
+	if (!(cluster == CL_ONE && table_offset == 1) &&
+		ptr->max_support_idx < cal_max_support_idx)
 		ptr->max_support_idx = cal_max_support_idx;
+	else if (cluster == CL_ONE && table_offset == 1)
+		pr_info("CPUFREQ CL1 OC visibility active: keeping max_support_idx at %u (3020000 exposed)\n",
+			ptr->max_support_idx);
 
 	pr_info("CPUFREQ of %s Current max freq %lu KHz\n",
 				cluster ? "CL1" : "CL0",

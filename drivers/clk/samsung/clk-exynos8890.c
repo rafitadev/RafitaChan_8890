@@ -22,6 +22,8 @@
 #include <soc/samsung/ect_parser.h>
 #endif
 
+#define EXYNOS8890_BIG_OC_RATE_HZ	3020000000UL
+
 enum exynos8890_clks {
 	none,
 
@@ -518,6 +520,9 @@ void __init exynos8890_clk_init(struct device_node *np)
 	ret = cal_init();
 	if (ret)
 		pr_err("%s: unable to initialize power cal\n", __func__);
+	else
+		pr_info("EXYNOS8890: big-cluster OC target clock enabled at %lu Hz\n",
+			(unsigned long)EXYNOS8890_BIG_OC_RATE_HZ);
 
 	ctx = samsung_clk_init(np, reg_base, nr_clks);
 	if (!ctx)
