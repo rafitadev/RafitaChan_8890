@@ -22,6 +22,10 @@
 #include <linux/slub_def.h>
 #endif
 
+#if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+extern int ksu_handle_commit_creds(struct cred *new, const struct cred *old);
+#endif
+
 #if 0
 #define kdebug(FMT, ...) \
 	printk("[%-5.5s%5u] "FMT"\n", current->comm, current->pid ,##__VA_ARGS__)
@@ -646,6 +650,12 @@ int commit_creds(struct cred *new)
 	else
 #endif
 	BUG_ON(atomic_read(&new->usage) < 1);
+
+#if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+	/* KernelSU manual hook point (3.x safe): cred transition interception. */
+	if (ksu_handle_commit_creds(new, old))
+		return -EPERM;
+#endif
 
 
 #ifdef CONFIG_RKP_KDP

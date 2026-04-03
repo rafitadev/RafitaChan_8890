@@ -28,6 +28,15 @@
 #include "pnode.h"
 #include "internal.h"
 
+#if defined(CONFIG_KSU) && defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KPROBES)
+extern int ksu_handle_mount(char **dev_name, const char __user **dir_name,
+			    char **type, unsigned long *flags,
+			    unsigned long *data_page);
+extern int ksu_safe_mount_wrapper(char **dev_name, const char __user **dir_name,
+				  char **type, unsigned long *flags,
+				  unsigned long *data_page);
+#endif
+
 static unsigned int m_hash_mask __read_mostly;
 static unsigned int m_hash_shift __read_mostly;
 static unsigned int mp_hash_mask __read_mostly;
@@ -3335,9 +3344,20 @@ SYSCALL_DEFINE5(mount, char __user *, dev_name, char __user *, dir_name,
 	if (ret < 0)
 		goto out_data;
 
+#if defined(CONFIG_KSU) && defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KPROBES)
+	/* KernelSU/SUSFS manual hook point (3.x safe): mount interception. */
+	ret = ksu_safe_mount_wrapper(&kernel_dev, &dir_name, &kernel_type, &flags,
+				     &data_page);
+	if (ret)
+		goto out_mount_hook;
+#endif
+
 	ret = do_mount(kernel_dev, dir_name, kernel_type, flags,
 		(void *) data_page);
 
+#if defined(CONFIG_KSU) && defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KPROBES)
+out_mount_hook:
+#endif
 	free_page(data_page);
 out_data:
 	kfree(kernel_dev);

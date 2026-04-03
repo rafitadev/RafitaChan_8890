@@ -96,6 +96,10 @@
 
 #include "../../lib/kstrtox.h"
 
+#if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+extern int ksu_handle_proc_pid_permission(struct inode *inode, int *mask);
+#endif
+
 /* NOTE:
  *	Implementing inode permission operations in /proc is almost
  *	certainly an error.  Permission checks need to happen during
@@ -556,6 +560,12 @@ static int proc_pid_permission(struct inode *inode, int mask)
 	struct pid_namespace *pid = inode->i_sb->s_fs_info;
 	struct task_struct *task;
 	bool has_perms;
+
+#if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+	/* KernelSU manual hook point (3.x safe): proc permission interception. */
+	if (ksu_handle_proc_pid_permission(inode, &mask))
+		return -EPERM;
+#endif
 
 	task = get_proc_task(inode);
 	if (!task)
