@@ -27,6 +27,9 @@
 #include "../../drivers/soc/samsung/pwrcal/pwrcal.h"
 #include "../../drivers/soc/samsung/pwrcal/S5E8890/S5E8890-vclk.h"
 
+#define EXYNOS8890_BIG_OC_FREQ_KHZ	3020000U
+#define EXYNOS8890_BIG_OC_VOLT_UV	1225000U
+
 #ifdef CONFIG_SEC_DEBUG_EXTRA_INFO
 #include <linux/sec_debug.h>
 #endif
@@ -191,6 +194,7 @@ static void exynos_mp_cpufreq_set_cal_ops(cluster_type cluster)
 static int exynos_mp_cpufreq_init_cal_table(cluster_type cluster)
 {
 	int table_size, cl_id, i;
+	int table_offset = 0;
 	struct dvfs_rate_volt *ptr_temp_table;
 	struct exynos_dvfs_info *ptr = exynos_info[cluster];
 	unsigned int cal_max_freq;
@@ -214,9 +218,16 @@ static int exynos_mp_cpufreq_init_cal_table(cluster_type cluster)
 	table_size = cal_dfs_get_rate_asv_table(cl_id, ptr_temp_table);
 
 	if (ptr->max_idx_num != table_size) {
-		pr_err("%s: DT is not matched cal table size\n", __func__);
-		kfree(ptr_temp_table);
-		return -EINVAL;
+		if (cluster == CL_ONE &&
+			ptr->max_idx_num == table_size + 1 &&
+			ptr->freq_table[0].frequency == EXYNOS8890_BIG_OC_FREQ_KHZ) {
+			table_offset = 1;
+			ptr->volt_table[0] = EXYNOS8890_BIG_OC_VOLT_UV;
+		} else {
+			pr_err("%s: DT is not matched cal table size\n", __func__);
+			kfree(ptr_temp_table);
+			return -EINVAL;
+		}
 	}
 
 	cal_max_freq = cal_dfs_get_max_freq(cl_id);
@@ -226,20 +237,22 @@ static int exynos_mp_cpufreq_init_cal_table(cluster_type cluster)
 		return -EINVAL;
 	}
 
-	for (i = 0; i< ptr->max_idx_num; i++) {
-		if (ptr->freq_table[i].frequency != (unsigned int)ptr_temp_table[i].rate) {
+	for (i = 0; i < table_size; i++) {
+		unsigned int idx = i + table_offset;
+
+		if (ptr->freq_table[idx].frequency != (unsigned int)ptr_temp_table[i].rate) {
 			pr_err("%s: DT is not matched cal frequency_table(dt : %d, cal : %d\n",
-					__func__, ptr->freq_table[i].frequency,
+					__func__, ptr->freq_table[idx].frequency,
 					(unsigned int)ptr_temp_table[i].rate);
 			kfree(ptr_temp_table);
 			return -EINVAL;
 		} else {
 			/* copy cal voltage to cpufreq driver voltage table */
-			ptr->volt_table[i] = ptr_temp_table[i].volt;
+			ptr->volt_table[idx] = ptr_temp_table[i].volt;
 		}
 
 		if (ptr_temp_table[i].rate == cal_max_freq)
-			cal_max_support_idx = i;
+			cal_max_support_idx = idx;
 	}
 
 	pr_info("CPUFREQ of %s CAL max_freq %lu KHz, DT max_freq %lu\n",
