@@ -70,6 +70,8 @@
 
 #define VOLT_RANGE_STEP		25000
 #define CLUSTER_ID(cl)		(cl ? ID_CL1 : ID_CL0)
+#define EXYNOS8890_BIG_OC_FREQ_KHZ	3020000U
+#define EXYNOS8890_BIG_OC_VOLT_UV	1225000U
 
 #define LIMIT_FREQ_DIVIDER	4
 
@@ -2682,6 +2684,75 @@ static int exynos_mp_cpufreq_parse_dt(struct device_node *np, cluster_type cl)
 
 	ptr->freq_table[ptr->max_idx_num].driver_data = ptr->max_idx_num;
 	ptr->freq_table[ptr->max_idx_num].frequency = CPUFREQ_TABLE_END;
+
+	if (cl == CL_ONE) {
+		bool found = false;
+
+		for (i = 0; i < ptr->max_idx_num; i++) {
+			if (ptr->freq_table[i].frequency == EXYNOS8890_BIG_OC_FREQ_KHZ) {
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) {
+			unsigned int old_num = ptr->max_idx_num;
+			struct cpufreq_frequency_table *new_freq_table;
+			unsigned int *new_volt_table;
+			unsigned int *new_bus_table;
+
+			new_freq_table = kzalloc(sizeof(*new_freq_table) * (old_num + 2), GFP_KERNEL);
+			new_volt_table = kzalloc(sizeof(*new_volt_table) * (old_num + 1), GFP_KERNEL);
+			new_bus_table = kzalloc(sizeof(*new_bus_table) * (old_num + 1), GFP_KERNEL);
+			if (!new_freq_table || !new_volt_table || !new_bus_table) {
+				kfree(new_freq_table);
+				kfree(new_volt_table);
+				kfree(new_bus_table);
+				return -ENOMEM;
+			}
+
+			new_freq_table[0].driver_data = 0;
+			new_freq_table[0].frequency = EXYNOS8890_BIG_OC_FREQ_KHZ;
+			new_volt_table[0] = EXYNOS8890_BIG_OC_VOLT_UV;
+			new_bus_table[0] = 1794000;
+
+			for (i = 0; i < old_num; i++) {
+				new_freq_table[i + 1].driver_data = i + 1;
+				new_freq_table[i + 1].frequency = ptr->freq_table[i].frequency;
+				new_volt_table[i + 1] = ptr->volt_table[i];
+				new_bus_table[i + 1] = ptr->bus_table[i];
+			}
+
+			new_freq_table[old_num + 1].driver_data = old_num + 1;
+			new_freq_table[old_num + 1].frequency = CPUFREQ_TABLE_END;
+
+			kfree(ptr->freq_table);
+			kfree(ptr->volt_table);
+			kfree(ptr->bus_table);
+			ptr->freq_table = new_freq_table;
+			ptr->volt_table = new_volt_table;
+			ptr->bus_table = new_bus_table;
+			ptr->max_idx_num = old_num + 1;
+
+			ptr->max_support_idx = 0;
+			ptr->min_support_idx += 1;
+		}
+
+		if (ptr->boost_freq < EXYNOS8890_BIG_OC_FREQ_KHZ)
+			ptr->boost_freq = EXYNOS8890_BIG_OC_FREQ_KHZ;
+		if (ptr->boot_cpu_max_qos < EXYNOS8890_BIG_OC_FREQ_KHZ)
+			ptr->boot_cpu_max_qos = EXYNOS8890_BIG_OC_FREQ_KHZ;
+		if (ptr->boot_cpu_min_qos > EXYNOS8890_BIG_OC_FREQ_KHZ)
+			ptr->boot_cpu_min_qos = EXYNOS8890_BIG_OC_FREQ_KHZ;
+#if defined(CONFIG_EXYNOS_BIG_FREQ_BOOST)
+		if (ptr->max_support_idx_table) {
+			unsigned int j;
+
+			for (j = 1; j <= NR_CLUST1_CPUS; j++)
+				ptr->max_support_idx_table[j] = 0;
+		}
+#endif
+	}
 
 	return 0;
 }
