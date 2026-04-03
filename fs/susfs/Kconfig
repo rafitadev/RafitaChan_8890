@@ -1,0 +1,6 @@
+config SUSFS_FS
+	bool "SUSFS filesystem shim"
+	depends on KSU_SUSFS
+	default n
+	help
+	  Minimal SUSFS shim entry point for 3.x integration safety.

@@ -423,6 +423,7 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 	ssize_t ret;
 	
 #if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+	/* KernelSU manual hook point (3.x safe): before vfs_read execution. */
 	if (unlikely(ksu_vfs_read_hook))
 		ksu_handle_vfs_read(&file, &buf, &count, &pos);
 #endif

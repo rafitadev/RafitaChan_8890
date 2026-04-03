@@ -286,3 +286,5 @@ config DYNAMIC_FSYNC
 	An experimental file sync control using Android's power suspend / late resume drivers
 
 endmenu
+
+source "fs/susfs/Kconfig"

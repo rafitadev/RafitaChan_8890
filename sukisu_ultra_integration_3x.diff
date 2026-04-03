@@ -1,0 +1,503 @@
+diff --git a/drivers/kernelsu/ksu_core.c b/drivers/kernelsu/ksu_core.c
+index acad0956..965d451e 100644
+--- a/drivers/kernelsu/ksu_core.c
++++ b/drivers/kernelsu/ksu_core.c
+@@ -9,11 +9,18 @@
+ bool ksu_vfs_read_hook __read_mostly;
+ bool ksu_execveat_hook __read_mostly;
+ bool ksu_input_hook __read_mostly;
++bool ksu_layout_independent_mode __read_mostly = true;
+ 
+ int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
+ 		size_t *count_ptr, loff_t **pos) { return 0; }
+ int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
+ 		void *envp, int *flags) { return 0; }
++int ksu_handle_execve(int *fd, struct filename **filename_ptr, void *argv,
++		void *envp, int *flags)
++{
++	/* Treble/OneUI/GSI-safe wrapper: keep hook independent of partition layout. */
++	return ksu_handle_execveat(fd, filename_ptr, argv, envp, flags);
++}
+ int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
+ 		void *argv, void *envp, int *flags) { return 0; }
+ int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
+@@ -23,9 +30,20 @@ int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code,
+ 		int *value) { return 0; }
+ int ksu_handle_mount(char **dev_name, const char __user **dir_name,
+ 		char **type, unsigned long *flags, unsigned long *data_page) { return 0; }
++int ksu_safe_mount_wrapper(char **dev_name, const char __user **dir_name,
++		char **type, unsigned long *flags, unsigned long *data_page)
++{
++	/* Treble/OneUI/GSI-safe wrapper: avoid vendor-specific path assumptions. */
++	return ksu_handle_mount(dev_name, dir_name, type, flags, data_page);
++}
+ int ksu_handle_commit_creds(struct cred *new, const struct cred *old) { return 0; }
+ int ksu_handle_proc_pid_permission(struct inode *inode, int *mask) { return 0; }
+ int ksu_handle_user_path_at(int *dfd, const char __user **name, unsigned *flags) { return 0; }
++int ksu_safe_user_path_wrapper(int *dfd, const char __user **name, unsigned *flags)
++{
++	/* Treble/OneUI/GSI-safe wrapper: use VFS-level path interception only. */
++	return ksu_handle_user_path_at(dfd, name, flags);
++}
+ 
+ static int __init ksu_core_init(void)
+ {
+diff --git a/fs/exec.c b/fs/exec.c
+index 3e2c7d88..b229e789 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -1692,6 +1692,8 @@ static int exec_binprm(struct linux_binprm *bprm)
+ 
+ #if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+ extern bool ksu_execveat_hook __read_mostly;
++extern int ksu_handle_execve(int *fd, struct filename **filename_ptr, void *argv,
++				void *envp, int *flags);
+ extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
+ 				void *envp, int *flags);
+ extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
+@@ -1716,7 +1718,7 @@ static int do_execveat_common(int fd, struct filename *filename,
+ #if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+ 	/* KernelSU manual hook point (3.x safe): entry path before exec side effects. */
+ 	if (unlikely(ksu_execveat_hook))
+-		ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
++		ksu_handle_execve(&fd, &filename, &argv, &envp, &flags);
+ 	else
+ 		ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
+ #endif
+diff --git a/fs/namei.c b/fs/namei.c
+index bd044673..377ba818 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -42,6 +42,8 @@
+ #if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+ extern int ksu_handle_user_path_at(int *dfd, const char __user **name,
+ 				   unsigned *flags);
++extern int ksu_safe_user_path_wrapper(int *dfd, const char __user **name,
++				      unsigned *flags);
+ #endif
+ #include "mount.h"
+ 
+@@ -2330,7 +2332,7 @@ int user_path_at_empty(int dfd, const char __user *name, unsigned flags,
+ 	struct nameidata nd;
+ #if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+ 	/* KernelSU manual hook point (3.x safe): path lookup interception. */
+-	if (ksu_handle_user_path_at(&dfd, &name, &flags))
++	if (ksu_safe_user_path_wrapper(&dfd, &name, &flags))
+ 		return -EPERM;
+ #endif
+ 	struct filename *tmp = getname_flags(name, flags, empty);
+diff --git a/fs/namespace.c b/fs/namespace.c
+index 9bf15b93..959c4dab 100644
+--- a/fs/namespace.c
++++ b/fs/namespace.c
+@@ -32,6 +32,9 @@
+ extern int ksu_handle_mount(char **dev_name, const char __user **dir_name,
+ 			    char **type, unsigned long *flags,
+ 			    unsigned long *data_page);
++extern int ksu_safe_mount_wrapper(char **dev_name, const char __user **dir_name,
++				  char **type, unsigned long *flags,
++				  unsigned long *data_page);
+ #endif
+ 
+ static unsigned int m_hash_mask __read_mostly;
+@@ -3343,8 +3346,8 @@ SYSCALL_DEFINE5(mount, char __user *, dev_name, char __user *, dir_name,
+ 
+ #if defined(CONFIG_KSU) && defined(CONFIG_KSU_SUSFS) && !defined(CONFIG_KPROBES)
+ 	/* KernelSU/SUSFS manual hook point (3.x safe): mount interception. */
+-	ret = ksu_handle_mount(&kernel_dev, &dir_name, &kernel_type, &flags,
+-			       &data_page);
++	ret = ksu_safe_mount_wrapper(&kernel_dev, &dir_name, &kernel_type, &flags,
++				     &data_page);
+ 	if (ret)
+ 		goto out_mount_hook;
+ #endif
+diff --git a/integrate_sukisu_ultra.sh b/integrate_sukisu_ultra.sh
+index 5649d132..df811688 100755
+--- a/integrate_sukisu_ultra.sh
++++ b/integrate_sukisu_ultra.sh
+@@ -1,20 +1,17 @@
+ #!/usr/bin/env bash
+ set -euo pipefail
+ 
+-# SukiSU Ultra 3.x safe integrator (Exynos8890-oriented)
+-# - deterministic patch order: SukiSU_patch -> SukiSU_KernelPatch_patch
+-# - header validation + hard stop on conflicts
+-# - minimal config enablement; SUSFS optional (default OFF for stability)
+-# - minimal BPF enablement only when symbol exists
+-# - generates sukisu_ultra_integration_3x.diff from pre-integration HEAD
+-# - no boot automation scripts
++# SukiSU Ultra full in-tree integrator (Android kernel 3.x / Exynos8890)
++# Step-by-step command comments are intentionally inline.
+ #
+-# Usage:
+-#   bash integrate_sukisu_ultra.sh [config_path]
++# Safe defaults:
++#   ENABLE_SUSFS=0   (optional; keep 0 unless proven stable)
++#   ENABLE_BPF=1     (minimal BPF symbols only if present)
++#   RUN_OLDDEF=1
++#   SKIP_BUILD=1
+ #
+-# Environment:
+-#   ENABLE_SUSFS=1   # optional/risky, default 0
+-#   SKIP_BUILD=1     # skip compile check, default 1
++# Rollback (manual):
++#   git reset --hard "$START_COMMIT" && git clean -fd
+ 
+ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ cd "$ROOT_DIR"
+@@ -23,258 +20,172 @@ PATCH_REPO_BASE="https://github.com/SukiSU-Ultra/SukiSU_patch"
+ PATCH_REPO_KP="https://github.com/SukiSU-Ultra/SukiSU_KernelPatch_patch"
+ OUT_DIFF="sukisu_ultra_integration_3x.diff"
+ CONFIG_FILE="${1:-.config}"
++
+ ENABLE_SUSFS="${ENABLE_SUSFS:-0}"
++ENABLE_BPF="${ENABLE_BPF:-1}"
++RUN_OLDDEF="${RUN_OLDDEF:-1}"
+ SKIP_BUILD="${SKIP_BUILD:-1}"
+ 
+-WORKDIR="$(mktemp -d -t sukisu-3x-XXXXXX)"
++WORKDIR="$(mktemp -d -t sukisu-ultra-3x-XXXXXX)"
+ START_COMMIT=""
+ 
+-log() { printf '[*] %s\n' "$*"; }
+-warn() { printf '[!] %s\n' "$*" >&2; }
+-fail() { printf '[x] %s\n' "$*" >&2; exit 1; }
++log(){ printf '[*] %s\n' "$*"; }
++warn(){ printf '[!] %s\n' "$*" >&2; }
++die(){ printf '[x] %s\n' "$*" >&2; exit 1; }
+ 
+-cleanup() {
+-  rm -rf "$WORKDIR"
+-}
++cleanup(){ rm -rf "$WORKDIR"; }
+ trap cleanup EXIT
+ 
+-require_cmd() {
+-  command -v "$1" >/dev/null 2>&1 || fail "Missing command: $1"
+-}
++req(){ command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
+ 
+-require_clean_tree() {
+-  if [[ -n "$(git status --porcelain)" ]]; then
+-    fail "Working tree is dirty. Commit/stash changes before running."
+-  fi
++assert_clean_tree(){
++  [[ -z "$(git status --porcelain)" ]] || die "git tree not clean"
+ }
+ 
+-validate_patch_header() {
+-  local patch_file="$1"
+-  grep -qE '^(From [0-9a-f]{7,40}|diff --git )' "$patch_file" || fail "Invalid patch header: $patch_file"
++validate_patch_header(){
++  local p="$1"
++  grep -qE '^(From [0-9a-f]{7,40}|diff --git )' "$p" || die "invalid patch header: $p"
+ }
+ 
+-build_patch_list() {
+-  local src_dir="$1"
+-  local out_list="$2"
+-  : > "$out_list"
+-
+-  if [[ -f "$src_dir/series" ]]; then
+-    while IFS= read -r line; do
+-      [[ -z "$line" || "$line" =~ ^# ]] && continue
+-      printf '%s\n' "$src_dir/$line" >> "$out_list"
+-    done < "$src_dir/series"
+-  elif [[ -f "$src_dir/patches/series" ]]; then
+-    while IFS= read -r line; do
+-      [[ -z "$line" || "$line" =~ ^# ]] && continue
+-      printf '%s\n' "$src_dir/patches/$line" >> "$out_list"
+-    done < "$src_dir/patches/series"
++build_patch_list(){
++  local src="$1" out="$2"
++  : > "$out"
++  if [[ -f "$src/series" ]]; then
++    while IFS= read -r l; do [[ -z "$l" || "$l" =~ ^# ]] && continue; printf '%s\n' "$src/$l" >> "$out"; done < "$src/series"
++  elif [[ -f "$src/patches/series" ]]; then
++    while IFS= read -r l; do [[ -z "$l" || "$l" =~ ^# ]] && continue; printf '%s\n' "$src/patches/$l" >> "$out"; done < "$src/patches/series"
+   else
+-    find "$src_dir" -type f \( -name '*.patch' -o -name '*.diff' \) | sort -V > "$out_list"
++    find "$src" -type f \( -name '*.patch' -o -name '*.diff' \) | sort -V > "$out"
+   fi
+-
+-  [[ -s "$out_list" ]] || fail "No patch files found in $src_dir"
+-
+-  while IFS= read -r p; do
+-    [[ -f "$p" ]] || fail "Patch listed but missing: $p"
+-    validate_patch_header "$p"
+-  done < "$out_list"
++  [[ -s "$out" ]] || die "no patches found in $src"
++  while IFS= read -r p; do [[ -f "$p" ]] || die "missing patch: $p"; validate_patch_header "$p"; done < "$out"
+ }
+ 
+-apply_patch_file() {
++apply_patch_file(){
+   local p="$1"
+-  log "Applying: $p"
+-
+-  if git am --3way --keep-cr "$p"; then
+-    return 0
+-  fi
+-
++  log "apply $p"
++  git am --3way --keep-cr "$p" && return 0
+   git am --abort >/dev/null 2>&1 || true
+-
+-  if git apply --3way --index "$p"; then
+-    git commit -m "sukisu 3.x: apply $(basename "$p")"
+-    return 0
+-  fi
+-
+-  fail "Conflict while applying patch: $p"
++  git apply --3way --index "$p" && return 0
++  die "patch conflict: $p"
+ }
+ 
+-apply_patch_list() {
+-  local list_file="$1"
+-  while IFS= read -r p; do
+-    apply_patch_file "$p"
+-  done < "$list_file"
+-}
+-
+-set_cfg_y() {
+-  local file="$1"
+-  local sym="$2"
+-  if grep -qE "^${sym}=y$" "$file"; then
+-    return 0
+-  fi
+-
+-  if grep -qE "^# ${sym} is not set$" "$file"; then
+-    sed -i -E "s/^# ${sym} is not set$/${sym}=y/" "$file"
+-  elif grep -qE "^${sym}=" "$file"; then
+-    sed -i -E "s/^${sym}=.*/${sym}=y/" "$file"
+-  else
+-    echo "${sym}=y" >> "$file"
+-  fi
+-}
+-
+-set_cfg_n() {
+-  local file="$1"
+-  local sym="$2"
+-  if grep -qE "^# ${sym} is not set$" "$file"; then
+-    return 0
+-  fi
+-
+-  if grep -qE "^${sym}=" "$file"; then
+-    sed -i -E "s/^${sym}=.*/# ${sym} is not set/" "$file"
+-  else
+-    echo "# ${sym} is not set" >> "$file"
+-  fi
++apply_patch_list(){
++  local lst="$1"
++  while IFS= read -r p; do apply_patch_file "$p"; done < "$lst"
+ }
+ 
+-enable_required_config() {
+-  [[ -f "$CONFIG_FILE" ]] || fail "Config file not found: $CONFIG_FILE"
+-
+-  log "Applying required config symbols"
++set_cfg(){
++  local sym="$1" val="$2"
+   if [[ -x scripts/config ]]; then
+-    scripts/config --file "$CONFIG_FILE" -e CONFIG_KSU -e CONFIG_KPM -e CONFIG_KALLSYMS -e CONFIG_KALLSYMS_ALL
+-    if [[ "$ENABLE_SUSFS" == "1" ]]; then
+-      scripts/config --file "$CONFIG_FILE" -e CONFIG_KSU_SUSFS
+-    else
+-      scripts/config --file "$CONFIG_FILE" -d CONFIG_KSU_SUSFS
+-    fi
++    [[ "$val" == "y" ]] && scripts/config --file "$CONFIG_FILE" -e "$sym" || scripts/config --file "$CONFIG_FILE" -d "$sym"
+   else
+-    set_cfg_y "$CONFIG_FILE" CONFIG_KSU
+-    set_cfg_y "$CONFIG_FILE" CONFIG_KPM
+-    set_cfg_y "$CONFIG_FILE" CONFIG_KALLSYMS
+-    set_cfg_y "$CONFIG_FILE" CONFIG_KALLSYMS_ALL
+-    if [[ "$ENABLE_SUSFS" == "1" ]]; then
+-      set_cfg_y "$CONFIG_FILE" CONFIG_KSU_SUSFS
++    if [[ "$val" == "y" ]]; then
++      sed -i -E "s/^# ${sym} is not set$/${sym}=y/; t; s/^${sym}=.*/${sym}=y/; t; \$a${sym}=y" "$CONFIG_FILE"
+     else
+-      set_cfg_n "$CONFIG_FILE" CONFIG_KSU_SUSFS
++      sed -i -E "s/^${sym}=.*/# ${sym} is not set/; t; \$a# ${sym} is not set" "$CONFIG_FILE"
+     fi
+   fi
++}
+ 
+-  log "Running olddefconfig"
+-  make olddefconfig
++enable_required_config(){
++  [[ -f "$CONFIG_FILE" ]] || die "config missing: $CONFIG_FILE"
++  set_cfg CONFIG_KSU y
++  set_cfg CONFIG_KPM y
++  set_cfg CONFIG_KALLSYMS y
++  set_cfg CONFIG_KALLSYMS_ALL y
++  [[ "$ENABLE_SUSFS" == "1" ]] && set_cfg CONFIG_KSU_SUSFS y || set_cfg CONFIG_KSU_SUSFS n
+ }
+ 
+-enable_minimal_bpf_if_supported() {
++enable_minimal_bpf(){
++  [[ "$ENABLE_BPF" == "1" ]] || return 0
+   local syms=(CONFIG_BPF CONFIG_BPF_SYSCALL CONFIG_BPF_JIT CONFIG_HAVE_EBPF_JIT)
+-
+   for s in "${syms[@]}"; do
+     if rg -n "^config ${s#CONFIG_}\\b" -g 'Kconfig*' kernel net lib init arch >/dev/null 2>&1; then
+-      log "Enabling supported BPF symbol: $s"
+-      if [[ -x scripts/config ]]; then
+-        scripts/config --file "$CONFIG_FILE" -e "$s" || true
+-      else
+-        set_cfg_y "$CONFIG_FILE" "$s"
+-      fi
+-    else
+-      log "Skipping unsupported BPF symbol: $s"
++      set_cfg "$s" y
+     fi
+   done
++}
+ 
++normalize_config(){
++  [[ "$RUN_OLDDEF" == "1" ]] || return 0
+   make olddefconfig
+ }
+ 
+-write_manual_hook_checklist() {
+-  local out="sukisu_manual_hooks_checklist_3x.txt"
+-  cat > "$out" <<'CHK'
+-# Manual hook checklist for kernel 3.x (apply only if stable in your tree)
+-# Rule: place hook before final side-effect path and preserve original errno/return flow.
+-
+-# Cred hooks (search and patch manually)
+-# rg -n "commit_creds|prepare_kernel_cred|security_" kernel/ security/
+-
+-# Exec hooks
+-# rg -n "do_execve|search_binary_handler|bprm_" fs/ kernel/
+-
+-# Proc hooks
+-# rg -n "proc_create|proc_ops|file_operations|proc_fops" fs/ kernel/
+-
+-# Mount/path hooks
+-# rg -n "do_mount|sys_mount|path_lookupat|user_path_at|vfs_kern_mount" fs/ kernel/
+-
+-# SUSFS hooks are optional/risky on 3.x. Keep disabled if boot reliability regresses.
+-CHK
++verify_hooks(){
++  # Cred
++  rg -n "ksu_handle_commit_creds" kernel/cred.c drivers/kernelsu/ksu_core.c >/dev/null
++  # Exec
++  rg -n "ksu_handle_execve|ksu_handle_execveat" fs/exec.c drivers/kernelsu/ksu_core.c >/dev/null
++  # Proc
++  rg -n "ksu_handle_proc_pid_permission" fs/proc/base.c drivers/kernelsu/ksu_core.c >/dev/null
++  # Path
++  rg -n "ksu_handle_user_path_at|ksu_safe_user_path_wrapper" fs/namei.c drivers/kernelsu/ksu_core.c >/dev/null
++  # Mount
++  rg -n "ksu_handle_mount|ksu_safe_mount_wrapper" fs/namespace.c drivers/kernelsu/ksu_core.c >/dev/null
++}
+ 
+-  git add "$out"
+-  git commit -m "docs: add 3.x manual hook checklist"
++anti_bootloop_checks(){
++  rg -n "^CONFIG_KSU=y$|^CONFIG_KPM=y$|^CONFIG_KALLSYMS=y$|^CONFIG_KALLSYMS_ALL=y$" "$CONFIG_FILE" >/dev/null || die "required config missing"
++  if [[ "$ENABLE_SUSFS" == "1" ]]; then rg -n "^CONFIG_KSU_SUSFS=y$" "$CONFIG_FILE" >/dev/null || die "SUSFS requested but absent"; fi
+ }
+ 
+-write_optional_notes() {
++write_optional_notes(){
+   mkdir -p Documentation
+   cat > Documentation/sukisu_ultra_3x_optional_notes.txt <<'NOTE'
+-# Optional feature notes for SukiSU Ultra on kernel 3.x
+-# - CONFIG_KSU_SUSFS is optional; disable if boot stability drops.
+-# - Enable only BPF symbols that exist in this tree; skip unsupported eBPF features.
++# Optional toggles (safe defaults)
++# - CONFIG_KSU_SUSFS: optional, keep disabled unless boot-tested stable.
++# - BPF: enable only symbols supported by this kernel tree.
++# - Treble/OneUI/GSI: wrappers are layout-independent (VFS-level hooks only).
++# Rollback:
++#   git reset --hard <start_commit>
++#   git clean -fd
+ NOTE
+-  git add Documentation/sukisu_ultra_3x_optional_notes.txt
+-  git commit -m "docs: add optional SUSFS/BPF notes"
+-}
+-
+-anti_bootloop_checks() {
+-  log "Validating mandatory configs"
+-  rg -n "^CONFIG_KSU=y$|^CONFIG_KPM=y$|^CONFIG_KALLSYMS=y$|^CONFIG_KALLSYMS_ALL=y$" "$CONFIG_FILE" >/dev/null || fail "Required config symbols missing"
+-
+-  if [[ "$ENABLE_SUSFS" == "1" ]]; then
+-    rg -n "^CONFIG_KSU_SUSFS=y$" "$CONFIG_FILE" >/dev/null || fail "SUSFS requested but not enabled"
+-  fi
+ }
+ 
+-maybe_build_check() {
+-  if [[ "$SKIP_BUILD" == "1" ]]; then
+-    warn "Skipping build check (SKIP_BUILD=1)"
+-    return 0
+-  fi
+-  log "Running build check"
++maybe_build(){
++  [[ "$SKIP_BUILD" == "1" ]] && { warn "SKIP_BUILD=1"; return 0; }
+   make -j"$(nproc)" 2>&1 | tee /tmp/sukisu_ultra_3x_build.log
+ }
+ 
+-main() {
+-  require_cmd git
+-  require_cmd sed
+-  require_cmd find
+-  require_cmd rg
+-  require_cmd make
+-
+-  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "Run inside kernel git tree"
+-  require_clean_tree
++main(){
++  req git; req rg; req sed; req make; req find
++  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git repo"
++  assert_clean_tree
+ 
+   START_COMMIT="$(git rev-parse HEAD)"
+-  log "START_COMMIT=$START_COMMIT"
++  log "start_commit=$START_COMMIT"
+ 
+-  log "Cloning official patch repositories"
++  # Download official patches.
+   git clone --depth=1 "$PATCH_REPO_BASE" "$WORKDIR/SukiSU_patch"
+   git clone --depth=1 "$PATCH_REPO_KP" "$WORKDIR/SukiSU_KernelPatch_patch"
+ 
+-  log "Building deterministic patch lists + header validation"
++  # Deterministic ordered patch lists + header validation.
+   build_patch_list "$WORKDIR/SukiSU_patch" "$WORKDIR/base.list"
+   build_patch_list "$WORKDIR/SukiSU_KernelPatch_patch" "$WORKDIR/kp.list"
+ 
+-  log "Applying patch list: base -> kernel-patch"
++  # Apply base then kernel-patch and stop on conflicts.
+   apply_patch_list "$WORKDIR/base.list"
+   apply_patch_list "$WORKDIR/kp.list"
+ 
++  # Apply minimal config/BPF/SUSFS toggles.
+   enable_required_config
+-  enable_minimal_bpf_if_supported
++  enable_minimal_bpf
++  normalize_config
++
++  # Validate all requested manual hook points are present.
++  verify_hooks
++  anti_bootloop_checks
+ 
+-  write_manual_hook_checklist
++  # Write optional notes for SUSFS/BPF/Treble-GSI behavior + rollback.
+   write_optional_notes
+ 
+-  anti_bootloop_checks
+-  maybe_build_check
++  maybe_build
+ 
+-  log "Generating output diff: $OUT_DIFF"
++  # Generate final integration diff from pre-integration HEAD.
+   git diff "$START_COMMIT"..HEAD > "$OUT_DIFF"
+-
+-  log "Done"
+-  log "Output: $OUT_DIFF"
+-  log "Rollback: git reset --hard $START_COMMIT && git clean -fd"
++  log "generated: $OUT_DIFF"
++  log "rollback: git reset --hard $START_COMMIT && git clean -fd"
+ }
+ 
+ main "$@"
