@@ -38,6 +38,13 @@
 #include <asm/uaccess.h>
 
 #include "internal.h"
+
+#if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+extern int ksu_handle_user_path_at(int *dfd, const char __user **name,
+				   unsigned *flags);
+extern int ksu_safe_user_path_wrapper(int *dfd, const char __user **name,
+				      unsigned *flags);
+#endif
 #include "mount.h"
 
 #define CREATE_TRACE_POINTS
@@ -2323,6 +2330,11 @@ int user_path_at_empty(int dfd, const char __user *name, unsigned flags,
 		 struct path *path, int *empty)
 {
 	struct nameidata nd;
+#if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+	/* KernelSU manual hook point (3.x safe): path lookup interception. */
+	if (ksu_safe_user_path_wrapper(&dfd, &name, &flags))
+		return -EPERM;
+#endif
 	struct filename *tmp = getname_flags(name, flags, empty);
 	int err = PTR_ERR(tmp);
 	if (!IS_ERR(tmp)) {

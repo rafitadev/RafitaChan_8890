@@ -1,0 +1,17 @@
+menu "KernelSU Ultra (3.x compatibility)"
+
+config KSU
+	bool "KernelSU core"
+	default y
+
+config KPM
+	bool "Kernel patch manager compatibility"
+	depends on KSU
+	default y
+
+config KSU_SUSFS
+	bool "SUSFS (optional, risk-aware)"
+	depends on KSU
+	default n
+
+endmenu

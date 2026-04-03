@@ -1,0 +1,238 @@
+diff --git a/integrate_sukisu_ultra.sh b/integrate_sukisu_ultra.sh
+index a1cb72ad..af233a47 100755
+--- a/integrate_sukisu_ultra.sh
++++ b/integrate_sukisu_ultra.sh
+@@ -1,11 +1,14 @@
+ #!/usr/bin/env bash
+ set -euo pipefail
+ 
+-# SukiSU Ultra 3.x auto-patcher (3.4..3.18 only)
+-# - Applies direct in-tree modifications (no 4.x patch import)
+-# - Inserts/updates 3.x-safe hooks: cred/exec/proc/mount/path
+-# - Keeps optional features (SUSFS/BPF) conservative
+-# - Generates sukisu_ultra_integration_3x.diff and rollback command
++# SukiSU Ultra 3.x auto-integrator (Exynos8890)
++# Boot-safety rules:
++# - 3.x only (3.4..3.18)
++# - idempotent patching (safe to re-run)
++# - backups before edit
++# - optional SUSFS with hard safety gate
++# - minimal BPF only if symbol exists
++# - rollback command always printed
+ 
+ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ cd "$ROOT_DIR"
+@@ -17,6 +20,9 @@ ENABLE_BPF="${ENABLE_BPF:-1}"
+ RUN_OLDDEF="${RUN_OLDDEF:-1}"
+ SKIP_BUILD="${SKIP_BUILD:-1}"
+ START_COMMIT=""
++BACKUP_DIR=".sukisu_backup_$(date +%Y%m%d_%H%M%S)"
++
++a=() # modified files list
+ 
+ log(){ printf '[*] %s\n' "$*"; }
+ warn(){ printf '[!] %s\n' "$*" >&2; }
+@@ -35,7 +41,56 @@ ensure_clean_tree(){
+   [[ -z "$(git status --porcelain)" ]] || die "working tree must be clean"
+ }
+ 
++track_modified(){
++  local f="$1"
++  for e in "${a[@]:-}"; do [[ "$e" == "$f" ]] && return 0; done
++  a+=("$f")
++}
++
++backup_file(){
++  local f="$1"
++  [[ -f "$f" ]] || return 0
++  mkdir -p "$BACKUP_DIR/$(dirname "$f")"
++  cp -a "$f" "$BACKUP_DIR/$f"
++}
++
++backup_all(){
++  [[ ${#a[@]} -eq 0 ]] && return 0
++  mkdir -p "$BACKUP_DIR"
++  for f in "${a[@]}"; do backup_file "$f"; done
++  log "backup created: $BACKUP_DIR"
++}
++
++# Validate anchor functions for Exynos8890 3.x before patching.
++validate_hook_targets(){
++  rg -n 'int commit_creds\(' kernel/cred.c >/dev/null || die "commit_creds target missing"
++  rg -n 'do_execveat_common' fs/exec.c >/dev/null || die "exec target missing"
++  rg -n 'proc_pid_permission' fs/proc/base.c >/dev/null || die "proc target missing"
++  rg -n 'SYSCALL_DEFINE5\(mount' fs/namespace.c >/dev/null || die "mount target missing"
++  rg -n 'user_path_at_empty' fs/namei.c >/dev/null || die "path target missing"
++}
++
++# Treble/OneUI/GSI compatibility precheck: no vendor-hardcoded interception assumptions.
++validate_layout_independence(){
++  rg -n '/vendor|/system|/product|/odm' drivers/kernelsu fs/{namei.c,namespace.c,exec.c,open.c,stat.c,read_write.c,proc/base.c} >/dev/null && \
++    warn "vendor/system path literal detected; verify hook code stays generic" || true
++}
++
+ ensure_kernelsu_tree(){
++  track_modified drivers/kernelsu/Kconfig
++  track_modified drivers/kernelsu/Makefile
++  track_modified drivers/kernelsu/ksu_core.c
++  track_modified drivers/Kconfig
++  track_modified drivers/Makefile
++  track_modified fs/Kconfig
++  track_modified fs/Makefile
++  track_modified fs/susfs/Kconfig
++  track_modified fs/susfs/Makefile
++  track_modified fs/susfs/susfs_stub.c
++  track_modified include/linux/susfs/susfs.h
++
++  backup_all
++
+   mkdir -p drivers/kernelsu fs/susfs include/linux/susfs
+ 
+   [[ -f drivers/kernelsu/Kconfig ]] || cat > drivers/kernelsu/Kconfig <<'KCFG'
+@@ -80,6 +135,7 @@ int ksu_handle_proc_pid_permission(struct inode *inode, int *mask){return 0;}
+ int ksu_handle_user_path_at(int *dfd, const char __user **name, unsigned *flags){return 0;}
+ KSU
+ 
++  # SUSFS optional: create stubs only; runtime enabling still controlled by CONFIG_KSU_SUSFS.
+   [[ -f fs/susfs/Kconfig ]] || cat > fs/susfs/Kconfig <<'SK'
+ config SUSFS_FS
+ 	bool "SUSFS filesystem shim"
+@@ -115,17 +171,14 @@ path = Path(sys.argv[2])
+ text = path.read_text()
+ orig = text
+ 
+-def add_once(anchor, snippet, before=False):
++def add_once(anchor, snippet):
+     global text
+     if snippet.strip() in text:
+         return
+     idx = text.find(anchor)
+     if idx < 0:
+-        raise SystemExit(f"ANCHOR_MISSING:{path}:{anchor[:60]}")
+-    if before:
+-        text = text[:idx] + snippet + text[idx:]
+-    else:
+-        text = text[:idx+len(anchor)] + snippet + text[idx+len(anchor):]
++        raise SystemExit(f"ANCHOR_MISSING:{path}:{anchor[:48]}")
++    text = text[:idx+len(anchor)] + snippet + text[idx+len(anchor):]
+ 
+ if mode == 'cred':
+     add_once('#include <linux/cn_proc.h>\n', '\n#if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)\nextern int ksu_handle_commit_creds(struct cred *new, const struct cred *old);\n#endif\n')
+@@ -144,7 +197,7 @@ elif mode == 'path':
+     add_once('#include "internal.h"\n', '\n#if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)\nextern int ksu_handle_user_path_at(int *dfd, const char __user **name,\n\t\t\t   unsigned *flags);\n#endif\n')
+     add_once('struct nameidata nd;\n', '\n#if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)\n\t/* KernelSU 3.x hook: user_path_at */\n\tif (ksu_handle_user_path_at(&dfd, &name, &flags))\n\t\treturn -EPERM;\n#endif\n')
+ else:
+-    raise SystemExit('bad mode')
++    raise SystemExit('BAD_MODE')
+ 
+ if text != orig:
+     path.write_text(text)
+@@ -152,6 +205,10 @@ PY
+ }
+ 
+ apply_hooks_3x(){
++  local targets=(kernel/cred.c fs/exec.c fs/proc/base.c fs/namespace.c fs/namei.c)
++  for f in "${targets[@]}"; do track_modified "$f"; done
++  backup_all
++
+   py_patch cred kernel/cred.c
+   py_patch exec fs/exec.c
+   py_patch proc fs/proc/base.c
+@@ -174,28 +231,31 @@ set_cfg(){
+ 
+ configure_kernel(){
+   [[ -f "$CONFIG_FILE" ]] || die "config file not found: $CONFIG_FILE"
++  track_modified "$CONFIG_FILE"
++  backup_all
++
+   set_cfg CONFIG_KSU y
+   set_cfg CONFIG_KPM y
+   set_cfg CONFIG_KALLSYMS y
+   set_cfg CONFIG_KALLSYMS_ALL y
+   [[ "$ENABLE_SUSFS" == "1" ]] && set_cfg CONFIG_KSU_SUSFS y || set_cfg CONFIG_KSU_SUSFS n
++
++  # Enable only BPF symbols that exist in this 3.x tree.
+   if [[ "$ENABLE_BPF" == "1" ]]; then
+     for s in CONFIG_BPF CONFIG_BPF_SYSCALL CONFIG_BPF_JIT CONFIG_HAVE_EBPF_JIT; do
+       rg -n "^config ${s#CONFIG_}\\b" -g 'Kconfig*' kernel net lib init arch >/dev/null 2>&1 && set_cfg "$s" y || true
+     done
+   fi
++
+   [[ "$RUN_OLDDEF" == "1" ]] && make olddefconfig
+ }
+ 
+-validate_hooks(){
++validate_post_patch(){
+   rg -n 'ksu_handle_commit_creds' kernel/cred.c >/dev/null || die "cred hook missing"
+   rg -n 'ksu_handle_execve' fs/exec.c >/dev/null || die "exec hook missing"
+   rg -n 'ksu_handle_proc_pid_permission' fs/proc/base.c >/dev/null || die "proc hook missing"
+   rg -n 'ksu_handle_mount' fs/namespace.c >/dev/null || die "mount hook missing"
+   rg -n 'ksu_handle_user_path_at' fs/namei.c >/dev/null || die "path hook missing"
+-}
+-
+-anti_bootloop(){
+   rg -n '^CONFIG_KSU=y$' "$CONFIG_FILE" >/dev/null || die "CONFIG_KSU missing"
+   rg -n '^CONFIG_KPM=y$' "$CONFIG_FILE" >/dev/null || die "CONFIG_KPM missing"
+   rg -n '^CONFIG_KALLSYMS=y$' "$CONFIG_FILE" >/dev/null || die "CONFIG_KALLSYMS missing"
+@@ -204,15 +264,19 @@ anti_bootloop(){
+ }
+ 
+ write_notes(){
++  track_modified Documentation/sukisu_ultra_3x_optional_notes.txt
++  backup_all
+   mkdir -p Documentation
+   cat > Documentation/sukisu_ultra_3x_optional_notes.txt <<'NOTE'
+ # Safety notes
+-# - SUSFS is optional; enable only after boot tests.
+-# - BPF symbols are enabled only when present in this 3.x source.
+-# - Hooks are VFS-level to stay Treble/OneUI/GSI layout-independent.
++# - SUSFS is optional; if any SUSFS symbol/file is missing, keep CONFIG_KSU_SUSFS disabled.
++# - BPF is enabled only for symbols present in this exact 3.x tree.
++# - Hooks are generic VFS/syscall points for Treble/OneUI/GSI layout independence.
+ # Rollback:
+ #   git reset --hard <START_COMMIT>
+ #   git clean -fd
++# Backup restore:
++#   cp -a .sukisu_backup_*/<path> <path>
+ NOTE
+ }
+ 
+@@ -224,24 +288,34 @@ maybe_build(){
+ main(){
+   req git; req rg; req sed; req awk; req python; req make
+   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git tree"
++
+   ensure_kernel_3x
+   ensure_clean_tree
+-
+   START_COMMIT="$(git rev-parse HEAD)"
+   log "START_COMMIT=$START_COMMIT"
+-  log "3.x mode only: ignoring any 4.x SukiSU patch flow"
+ 
++  validate_hook_targets
++  validate_layout_independence
+   ensure_kernelsu_tree
++
++  # SUSFS safety gate: if requested but core files unavailable, disable to avoid boot break.
++  if [[ "$ENABLE_SUSFS" == "1" ]]; then
++    [[ -f fs/susfs/Kconfig && -f fs/susfs/Makefile && -f fs/susfs/susfs_stub.c ]] || {
++      warn "SUSFS files incomplete; forcing ENABLE_SUSFS=0 for safety"
++      ENABLE_SUSFS=0
++    }
++  fi
++
+   apply_hooks_3x
+   configure_kernel
+-  validate_hooks
+-  anti_bootloop
++  validate_post_patch
+   write_notes
+   maybe_build
+ 
+   git diff "$START_COMMIT"..HEAD > "$OUT_DIFF"
+   log "generated: $OUT_DIFF"
+   log "rollback: git reset --hard $START_COMMIT && git clean -fd"
++  log "backup: $BACKUP_DIR"
+ }
+ 
+ main "$@"
