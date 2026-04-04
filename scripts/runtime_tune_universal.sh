@@ -42,6 +42,6 @@ done
 
 # Optional CPU ceilings (safe upper bounds for OC builds)
 set_if_exists /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2106000
-set_if_exists /sys/devices/system/cpu/cpu4/cpufreq/scaling_max_freq 3020000
+set_if_exists /sys/devices/system/cpu/cpu4/cpufreq/scaling_max_freq 3016000
 
 exit 0
