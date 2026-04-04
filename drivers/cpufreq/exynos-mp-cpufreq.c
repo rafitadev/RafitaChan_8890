@@ -70,10 +70,10 @@
 
 #define VOLT_RANGE_STEP		25000
 #define CLUSTER_ID(cl)		(cl ? ID_CL1 : ID_CL0)
-#define EXYNOS8890_BIG_OC_FREQ_KHZ	3020000U
+#define EXYNOS8890_BIG_OC_FREQ_KHZ	3016000U
 #define EXYNOS8890_BIG_OC_VOLT_UV	1325000U
 #define EXYNOS8890_BIG_OC_MAX_SAFE_VOLT_UV	1350000U
-#define EXYNOS8890_BIG_OC_THERMAL_FLOOR_KHZ	3020000U
+#define EXYNOS8890_BIG_OC_THERMAL_FLOOR_KHZ	3016000U
 
 #define LIMIT_FREQ_DIVIDER	4
 
@@ -230,8 +230,6 @@ static unsigned int exynos_cpufreq_get_possible_max_freq(int num_of_online)
 	}
 
 	possible = exynos_info[CL_ONE]->freq_table[idx].frequency;
-	if (possible < EXYNOS8890_BIG_OC_FREQ_KHZ)
-		possible = EXYNOS8890_BIG_OC_FREQ_KHZ;
 
 	return possible;
 }
@@ -1296,7 +1294,7 @@ static int exynos_cpufreq_force_oc_entry(cluster_type cur)
 		exynos_info[cur]->volt_table = new_volt_table;
 		exynos_info[cur]->bus_table = new_bus_table;
 		exynos_info[cur]->max_idx_num = n + 1;
-		pr_info("[OC VERIFY] reinserted 3020000 at index 0 after validation path\n");
+		pr_info("[OC VERIFY] reinserted 3016000 at index 0 after validation path\n");
 		return 1;
 	}
 
@@ -1314,7 +1312,7 @@ static int exynos_cpufreq_force_oc_entry(cluster_type cur)
 		table[oc_idx].frequency = tmp_freq;
 		exynos_info[cur]->volt_table[oc_idx] = tmp_volt;
 		exynos_info[cur]->bus_table[oc_idx] = tmp_bus;
-		pr_info("[OC VERIFY] moved 3020000 to index 0 after validation path\n");
+		pr_info("[OC VERIFY] moved 3016000 to index 0 after validation path\n");
 		return 1;
 	}
 
@@ -1360,15 +1358,6 @@ static int exynos_cpufreq_cpu_init(struct cpufreq_policy *policy)
 	ret = cpufreq_frequency_table_cpuinfo(policy, exynos_info[cur]->freq_table);
 	if (ret)
 		return ret;
-
-	if (policy->cpu >= NR_CLUST0_CPUS) {
-		policy->freq_table = exynos_info[cur]->freq_table;
-		policy->cpuinfo.max_freq = EXYNOS8890_BIG_OC_FREQ_KHZ;
-		policy->max = EXYNOS8890_BIG_OC_FREQ_KHZ;
-		policy->user_policy.max = EXYNOS8890_BIG_OC_FREQ_KHZ;
-		pr_info("[OC FINAL] max_freq forced AFTER validation: cpu=%u cpuinfo_max=%u policy_max=%u user_max=%u\n",
-			policy->cpu, policy->cpuinfo.max_freq, policy->max, policy->user_policy.max);
-	}
 
 	for (i = 0; exynos_info[cur]->freq_table[i].frequency != CPUFREQ_TABLE_END; i++) {
 		if (exynos_info[cur]->freq_table[i].frequency == CPUFREQ_ENTRY_INVALID)
@@ -2078,12 +2067,6 @@ static int exynos_cluster1_max_qos_handler(struct notifier_block *b, unsigned lo
 	unsigned long freq;
 	struct cpufreq_policy *policy;
 	int cpu = boot_cluster ? 0 : NR_CLUST0_CPUS;
-
-	if (val < EXYNOS8890_BIG_OC_THERMAL_FLOOR_KHZ) {
-		pr_info("CL1 max_qos floor: %lu -> %u\n",
-			val, EXYNOS8890_BIG_OC_THERMAL_FLOOR_KHZ);
-		val = EXYNOS8890_BIG_OC_THERMAL_FLOOR_KHZ;
-	}
 
 	freq = exynos_getspeed(cpu);
 	if (freq <= val)
@@ -2892,12 +2875,6 @@ static int exynos_mp_cpufreq_parse_dt(struct device_node *np, cluster_type cl)
 			ptr->min_support_idx += 1;
 		}
 
-		if (ptr->boost_freq < EXYNOS8890_BIG_OC_FREQ_KHZ)
-			ptr->boost_freq = EXYNOS8890_BIG_OC_FREQ_KHZ;
-		if (ptr->boot_cpu_max_qos < EXYNOS8890_BIG_OC_FREQ_KHZ)
-			ptr->boot_cpu_max_qos = EXYNOS8890_BIG_OC_FREQ_KHZ;
-		if (ptr->boot_cpu_min_qos > EXYNOS8890_BIG_OC_FREQ_KHZ)
-			ptr->boot_cpu_min_qos = EXYNOS8890_BIG_OC_FREQ_KHZ;
 #if defined(CONFIG_EXYNOS_BIG_FREQ_BOOST)
 		if (ptr->max_support_idx_table) {
 			unsigned int j;

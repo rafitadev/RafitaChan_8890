@@ -435,14 +435,14 @@
 		cl1_idx_num = <27>;
 		cl1_max_support_idx = <0>;
 		cl1_min_support_idx = <25>;
-		cl1_boot_max_qos = <3020000>;
-		cl1_boot_min_qos = <3020000>;
+		cl1_boot_max_qos = <3016000>;
+		cl1_boot_min_qos = <3016000>;
 		cl1_en_ema = <1>;
 		cl1_en_smpl = <1>;
 		cl1_jig_boot_max_qos = <1456000>;
 		cl1_reboot_limit_freq = <728000>;
 		cl1_min_qos_freq = <1456000>;
-		cl1_boost_freq = <3020000>;
+		cl1_boost_freq = <3016000>;
 		cl1_max_support_idx_table = < 0	   /* Number of online core is 0 */
 					      0    /* Number of online core is 1 */
 					      0    /* Number of online core is 2 */
@@ -476,7 +476,7 @@
 
 		/*MNGS table ->	 idx  freq    volt   bus_lock */
 		cl1_dvfs_domain_name = "dvfs_big";
-		cl1_dvfs_table = < 0 3020000 1225000   1794000 /* ARM L0: 3.020GHz */
+		cl1_dvfs_table = < 0 3016000 1325000   1794000 /* ARM L0: 3.016GHz */
 				   1 2704000 1187500   1794000 /* ARM L1: 2.704GHz */
 				   2 2600000 1137500   1794000 /* ARM L2: 2.6GHz   */
 				   3 2496000 1137500   1716000 /* ARM L3: 2.5GHz   */

@@ -26,7 +26,7 @@ struct pwrcal_clk *div_type_list[NUM_OF_DIV_TYPE];
 struct pwrcal_clk *gate_type_list[NUM_OF_GATE_TYPE];
 
 #define ADD_CLK_TO_LIST(to, x)	to[clk_##x.clk.id & 0xFFF] = &(clk_##x.clk)
-#define EXYNOS8890_BIG_OC_RATE_HZ	3020000000UL
+#define EXYNOS8890_BIG_OC_RATE_HZ	3016000000UL
 #define EXYNOS8890_BIG_BASE_RATE_HZ	2700000000UL
 
 CLK_PLL(14160,	MNGS_PLL,	0,	MNGS_PLL_LOCK,	MNGS_PLL_CON0,	NULL,	MNGS_MUX_MNGS_PLL,	&pll141xx_ops);
@@ -2202,14 +2202,14 @@ void clk_pll_set_rate_table(struct pwrcal_pll *pll)
 		oc_entry->rate = EXYNOS8890_BIG_OC_RATE_HZ;
 		/*
 		 * Keep pdiv/sdiv/kdiv from the top validated step (2.70GHz)
-		 * and scale mdiv to synthesize a 3.02GHz PLL point.
+		 * and scale mdiv to synthesize a 3.016GHz PLL point.
 		 */
 		scaled_mdiv = ((unsigned long long)base_entry->mdiv * EXYNOS8890_BIG_OC_RATE_HZ)
 			+ (EXYNOS8890_BIG_BASE_RATE_HZ / 2);
 		do_div(scaled_mdiv, EXYNOS8890_BIG_BASE_RATE_HZ);
 		oc_entry->mdiv = (unsigned int)scaled_mdiv;
 
-		pr_info("OC PLL ACTIVE: 3020000000 (%s mdiv %u -> %u)\n",
+		pr_info("OC PLL ACTIVE: 3016000000 (%s mdiv %u -> %u)\n",
 			pll->clk.name, base_entry->mdiv, oc_entry->mdiv);
 	}
 

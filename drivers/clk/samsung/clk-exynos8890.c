@@ -22,7 +22,7 @@
 #include <soc/samsung/ect_parser.h>
 #endif
 
-#define EXYNOS8890_BIG_OC_RATE_HZ	3020000000UL
+#define EXYNOS8890_BIG_OC_RATE_HZ	3016000000UL
 
 enum exynos8890_clks {
 	none,
