@@ -87,6 +87,11 @@ Artefato principal esperado:
   ```
 - Aplicar esse script no boot (Magisk service.d) se desejar perfil persistente.
 - O runtime tune agora aplica prevenção automática: se 3016000 não for suportado no momento, ele escolhe o maior bin seguro disponível em vez de forçar alvo inalcançável.
+- Se você quiser comportamento dinâmico estilo **2.8 ↔ 3.016 GHz** (sobe em burst e reduz quando esquenta), rode o guard adaptativo em background:
+  ```bash
+  su -c sh /path/para/kernel/scripts/oc_adaptive_guard.sh &
+  ```
+  - Ajustes opcionais: `HIGH_KHZ`, `LOW_KHZ`, `TEMP_HIGH_MILLIC`, `TEMP_LOW_MILLIC`, `INTERVAL_MS`.
 - Em caso de aquecimento excessivo, reduza `scaling_max_freq` do cluster big para 2808000.
 - Verificação de estabilidade do OC 3016 (3 rodadas por padrão):
   ```bash
