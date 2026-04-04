@@ -92,6 +92,8 @@ Artefato principal esperado:
   su -c sh /path/para/kernel/scripts/oc_adaptive_guard.sh &
   ```
   - Ajustes opcionais: `HIGH_KHZ`, `LOW_KHZ`, `TEMP_HIGH_MILLIC`, `TEMP_LOW_MILLIC`, `INTERVAL_MS`.
+  - `HIGH_KHZ`/`LOW_KHZ` aceitam qualquer frequência em KHz (ex.: `2900000`, `2600000`) ou `auto`/`auto-1` para usar automaticamente os bins do seu aparelho.
+  - Exemplo custom: `HIGH_KHZ=2900000 LOW_KHZ=2500000 su -c sh /path/para/kernel/scripts/oc_adaptive_guard.sh &`
 - Em caso de aquecimento excessivo, reduza `scaling_max_freq` do cluster big para 2808000.
 - Verificação de estabilidade do OC 3016 (3 rodadas por padrão):
   ```bash

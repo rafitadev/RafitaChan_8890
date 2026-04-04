@@ -1,12 +1,15 @@
 #!/system/bin/sh
 # Adaptive Exynos8890 big-cluster OC guard.
-# Goal: allow burst to 3016MHz, but fall back near 2808MHz when hot.
-# This mimics the "2.8 -> 3.0 -> 2.8" behavior users expect under real load.
+# Allows dynamic caps and custom target frequencies.
 
 set -eu
 
-HIGH_KHZ="${HIGH_KHZ:-3016000}"
-LOW_KHZ="${LOW_KHZ:-2808000}"
+# HIGH_KHZ / LOW_KHZ accept:
+# - integer KHz (e.g. 3016000, 2808000, 2600000)
+# - "auto"    : highest available frequency
+# - "auto-1"  : one step below highest available frequency
+HIGH_KHZ="${HIGH_KHZ:-auto}"
+LOW_KHZ="${LOW_KHZ:-auto-1}"
 TEMP_HIGH_MILLIC="${TEMP_HIGH_MILLIC:-78000}"
 TEMP_LOW_MILLIC="${TEMP_LOW_MILLIC:-70000}"
 INTERVAL_MS="${INTERVAL_MS:-800}"
@@ -44,6 +47,34 @@ apply_cap() {
   done
 }
 
+resolve_freq() {
+  # Args: spec available_freqs(desc, newline)
+  local spec="$1"
+  local avail="$2"
+
+  if [ -z "$avail" ]; then
+    return 1
+  fi
+
+  case "$spec" in
+    auto)
+      echo "$avail" | sed -n '1p'
+      return 0
+      ;;
+    auto-1)
+      v="$(echo "$avail" | sed -n '2p')"
+      [ -n "$v" ] && { echo "$v"; return 0; }
+      echo "$avail" | sed -n '1p'
+      return 0
+      ;;
+    *)
+      # Numeric cap request: choose highest available <= requested.
+      echo "$avail" | awk -v t="$spec" '$1 <= t { print; exit }'
+      return 0
+      ;;
+  esac
+}
+
 if ! CPU_POL="$(pick_policy 2>/dev/null)"; then
   if [ "$ALLOW_MISSING" = "1" ]; then
     echo "WARN: cpufreq policy not found; skipping (ALLOW_MISSING=1)."
@@ -59,23 +90,33 @@ else
   CPU_LIST="4 5 6 7"
 fi
 
-# Clamp HIGH/LOW to available frequencies if possible.
+AVAIL=""
 if [ -r "${CPU_POL}/scaling_available_frequencies" ]; then
   AVAIL="$(tr ' ' '\n' < "${CPU_POL}/scaling_available_frequencies" | sed '/^$/d' | sort -nr)"
-  hi_candidate="$(echo "${AVAIL}" | awk -v t="${HIGH_KHZ}" '$1 <= t { print; exit }')"
-  lo_candidate="$(echo "${AVAIL}" | awk -v t="${LOW_KHZ}" '$1 <= t { print; exit }')"
-  [ -n "${hi_candidate}" ] && HIGH_KHZ="${hi_candidate}"
-  [ -n "${lo_candidate}" ] && LOW_KHZ="${lo_candidate}"
 fi
 
-if [ "$LOW_KHZ" -gt "$HIGH_KHZ" ]; then
-  LOW_KHZ="$HIGH_KHZ"
+if [ -n "$AVAIL" ]; then
+  HIGH_RESOLVED="$(resolve_freq "$HIGH_KHZ" "$AVAIL")"
+  LOW_RESOLVED="$(resolve_freq "$LOW_KHZ" "$AVAIL")"
+else
+  # Fallback defaults if frequency table is missing.
+  HIGH_RESOLVED="${HIGH_KHZ#auto}"
+  LOW_RESOLVED="${LOW_KHZ#auto-1}"
+  [ -z "$HIGH_RESOLVED" ] && HIGH_RESOLVED=3016000
+  [ -z "$LOW_RESOLVED" ] && LOW_RESOLVED=2808000
+fi
+
+[ -z "$HIGH_RESOLVED" ] && HIGH_RESOLVED=3016000
+[ -z "$LOW_RESOLVED" ] && LOW_RESOLVED="$HIGH_RESOLVED"
+
+if [ "$LOW_RESOLVED" -gt "$HIGH_RESOLVED" ]; then
+  LOW_RESOLVED="$HIGH_RESOLVED"
 fi
 
 mode="high"
 last_cap=0
 
-echo "Adaptive OC guard started: HIGH=${HIGH_KHZ} LOW=${LOW_KHZ} temp_hi=${TEMP_HIGH_MILLIC} temp_lo=${TEMP_LOW_MILLIC}"
+echo "Adaptive OC guard started: HIGH=${HIGH_RESOLVED} LOW=${LOW_RESOLVED} temp_hi=${TEMP_HIGH_MILLIC} temp_lo=${TEMP_LOW_MILLIC}"
 
 while :; do
   tmax="$(read_max_temp)"
@@ -87,9 +128,9 @@ while :; do
   fi
 
   if [ "$mode" = "high" ]; then
-    cap="$HIGH_KHZ"
+    cap="$HIGH_RESOLVED"
   else
-    cap="$LOW_KHZ"
+    cap="$LOW_RESOLVED"
   fi
 
   if [ "$cap" -ne "$last_cap" ]; then
