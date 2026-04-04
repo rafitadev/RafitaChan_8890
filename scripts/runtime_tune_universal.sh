@@ -1,11 +1,73 @@
 #!/system/bin/sh
 # Runtime performance profile for Exynos8890 Treble/OneUI/AOSP.
-# Execute as root after boot. Values are conservative-aggressive.
+# Execute as root after boot. Values are conservative-aggressive with OC safeguards.
 
 set -eu
 
+TARGET_BIG_MAX_KHZ="${TARGET_BIG_MAX_KHZ:-3016000}"
+TARGET_LITTLE_MAX_KHZ="${TARGET_LITTLE_MAX_KHZ:-2106000}"
+LOCK_BIG_MAX_TO_TARGET="${LOCK_BIG_MAX_TO_TARGET:-1}"
+
 set_if_exists() {
   [ -e "$1" ] && echo "$2" > "$1"
+}
+
+pick_cpufreq_policy() {
+  # Prefer big cluster policy if exposed by per-cpu path.
+  if [ -d /sys/devices/system/cpu/cpu4/cpufreq ]; then
+    echo "/sys/devices/system/cpu/cpu4/cpufreq"
+    return 0
+  fi
+
+  # Fallback policy paths (some kernels expose only policyX).
+  for p in /sys/devices/system/cpu/cpufreq/policy4 /sys/devices/system/cpu/cpufreq/policy0; do
+    [ -d "$p" ] && { echo "$p"; return 0; }
+  done
+
+  return 1
+}
+
+select_big_max_freq() {
+  # Args: policy_path target_khz
+  local policy="$1"
+  local target="$2"
+  local avail="${policy}/scaling_available_frequencies"
+
+  if [ "${LOCK_BIG_MAX_TO_TARGET}" = "1" ]; then
+    if [ -r "${avail}" ] && tr ' ' '
+' < "${avail}" | grep -qx "${target}"; then
+      echo "${target}"
+      return 0
+    fi
+
+    # If target is not exposed by this kernel/device, fallback to top available.
+    if [ -r "${avail}" ]; then
+      tr ' ' '
+' < "${avail}" | sed '/^$/d' | sort -nr | head -n1
+      return 0
+    fi
+
+    echo "${target}"
+    return 0
+  fi
+
+  # Legacy preventive mode (only used when LOCK_BIG_MAX_TO_TARGET=0)
+  local cpuinfo_max="${policy}/cpuinfo_max_freq"
+  local cap="${target}"
+  if [ -r "${cpuinfo_max}" ]; then
+    local ci
+    ci="$(cat "${cpuinfo_max}")"
+    [ "${ci}" -lt "${cap}" ] && cap="${ci}"
+  fi
+
+  if [ -r "${avail}" ]; then
+    tr ' ' '
+' < "${avail}" | sed '/^$/d' | sort -nr | while read -r f; do
+      [ "${f}" -le "${cap}" ] && { echo "${f}"; break; }
+    done
+  else
+    echo "${cap}"
+  fi
 }
 
 # VM tuning
@@ -40,8 +102,33 @@ for gov in /sys/devices/system/cpu/cpufreq/interactive /sys/devices/system/cpu/c
   set_if_exists "$gov/target_loads" "80 1300000:85 1900000:90"
 done
 
-# Optional CPU ceilings (safe upper bounds for OC builds)
-set_if_exists /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2106000
-set_if_exists /sys/devices/system/cpu/cpu4/cpufreq/scaling_max_freq 3020000
+# Little cluster ceiling (safe fixed cap)
+set_if_exists /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq "${TARGET_LITTLE_MAX_KHZ}"
+
+# Big cluster ceiling (preventive: never request unsupported bin)
+if BIG_POLICY="$(pick_cpufreq_policy 2>/dev/null)"; then
+  SAFE_BIG_MAX="$(select_big_max_freq "${BIG_POLICY}" "${TARGET_BIG_MAX_KHZ}")"
+
+  if [ -n "${SAFE_BIG_MAX}" ]; then
+    if [ "${SAFE_BIG_MAX}" -lt "${TARGET_BIG_MAX_KHZ}" ]; then
+      echo "WARN: target ${TARGET_BIG_MAX_KHZ} KHz not exposed; applying top available ${SAFE_BIG_MAX} KHz."
+    else
+      echo "INFO: enforcing big max ${SAFE_BIG_MAX} KHz."
+    fi
+
+    if [ -r "${BIG_POLICY}/related_cpus" ]; then
+      CPU_LIST="$(cat "${BIG_POLICY}/related_cpus")"
+    else
+      CPU_LIST="4 5 6 7"
+    fi
+
+    for c in ${CPU_LIST}; do
+      set_if_exists "/sys/devices/system/cpu/cpu${c}/cpufreq/scaling_max_freq" "${SAFE_BIG_MAX}"
+    done
+  fi
+else
+  # Legacy fallback path
+  set_if_exists /sys/devices/system/cpu/cpu4/cpufreq/scaling_max_freq "${TARGET_BIG_MAX_KHZ}"
+fi
 
 exit 0

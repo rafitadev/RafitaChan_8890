@@ -27,7 +27,7 @@
 #include "../../drivers/soc/samsung/pwrcal/pwrcal.h"
 #include "../../drivers/soc/samsung/pwrcal/S5E8890/S5E8890-vclk.h"
 
-#define EXYNOS8890_BIG_OC_FREQ_KHZ	3020000U
+#define EXYNOS8890_BIG_OC_FREQ_KHZ	3016000U
 #define EXYNOS8890_BIG_OC_VOLT_UV	1325000U
 #define EXYNOS8890_BIG_OC_MAX_SAFE_VOLT_UV	1350000U
 #define VOLT_RANGE_STEP			25000
@@ -100,8 +100,10 @@ static void exynos_mp_cpufreq_cl1_set_freq(unsigned int old_index,
 	pr_info("CL1 runtime verify: target=%luKHz active=%uKHz\n",
 		target_khz, active_khz);
 	if (target_khz == EXYNOS8890_BIG_OC_FREQ_KHZ &&
-		active_khz < EXYNOS8890_BIG_OC_FREQ_KHZ)
-		pr_err("CL1 runtime verify: hardware did not reach 3020000KHz\n");
+		active_khz < EXYNOS8890_BIG_OC_FREQ_KHZ) {
+		pr_err("CL1 runtime verify: hardware did not reach 3016000KHz\n");
+		pr_warn("CL1 runtime verify: keeping 3016000KHz OPP enabled for retry\n");
+	}
 }
 
 static void exynos_mp_cpufreq_cl1_set_ema(unsigned int volt)
@@ -278,21 +280,26 @@ static int exynos_mp_cpufreq_init_cal_table(cluster_type cluster)
 			cal_max_support_idx = idx;
 	}
 
-	pr_info("CPUFREQ of %s CAL max_freq %lu KHz, DT max_freq %lu\n",
+	pr_info("CPUFREQ of %s CAL max_freq %u KHz, DT max_freq %u\n",
 			cluster ? "CL1" : "CL0",
-			ptr_temp_table[cal_max_support_idx].rate,
-			ptr_temp_table[ptr->max_support_idx].rate);
+			cal_max_freq,
+			ptr->freq_table[ptr->max_support_idx].frequency);
 
 	if (!(cluster == CL_ONE && table_offset == 1) &&
 		ptr->max_support_idx < cal_max_support_idx)
 		ptr->max_support_idx = cal_max_support_idx;
-	else if (cluster == CL_ONE && table_offset == 1)
-		pr_info("CPUFREQ CL1 OC visibility active: keeping max_support_idx at %u (3020000 exposed)\n",
-			ptr->max_support_idx);
+	else if (cluster == CL_ONE && table_offset == 1) {
+		if (cal_max_freq < EXYNOS8890_BIG_OC_FREQ_KHZ) {
+			pr_info("CPUFREQ CL1: CAL max below 3016000KHz (%uKHz), but keeping OC OPP enabled\n",
+				cal_max_freq);
+		} else {
+			pr_info("CPUFREQ CL1: keeping 3016000KHz OPP enabled\n");
+		}
+	}
 
 	pr_info("CPUFREQ of %s Current max freq %lu KHz\n",
 				cluster ? "CL1" : "CL0",
-				ptr_temp_table[ptr->max_support_idx].rate);
+				ptr->freq_table[ptr->max_support_idx].frequency);
 
 	/* free temporary memory */
 	kfree(ptr_temp_table);

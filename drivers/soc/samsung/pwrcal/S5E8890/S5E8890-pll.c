@@ -36,7 +36,7 @@
 #define PLL1431X_BYPASS			4
 
 #define FIN_HZ_26M		(26*MHZ)
-#define EXYNOS8890_BIG_OC_RATE_HZ	3020000000ULL
+#define EXYNOS8890_BIG_OC_RATE_HZ	3016000000ULL
 
 static int mfc_pll_refcount[2] = {1, 1};
 
