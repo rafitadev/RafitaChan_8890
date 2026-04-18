@@ -1663,6 +1663,19 @@ static int bpf_obj_get_info_by_fd(const union bpf_attr *attr,
 	return err;
 }
 
+#define BPF_PROG_TEST_RUN_LAST_FIELD test.prog_fd
+static int bpf_prog_test_run(const union bpf_attr *attr)
+{
+	/*
+	 * Keep command wired in syscall dispatcher when UAPI advertises it.
+	 * Full backend test-run support is not available in this tree yet.
+	 */
+	if (CHECK_ATTR(BPF_PROG_TEST_RUN))
+		return -EINVAL;
+
+	return -ENOTSUPP;
+}
+
 SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, size)
 {
 	union bpf_attr attr;
@@ -1717,6 +1730,9 @@ SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, siz
 		break;
 	case BPF_PROG_LOAD:
 		err = bpf_prog_load(&attr);
+		break;
+	case BPF_PROG_TEST_RUN:
+		err = bpf_prog_test_run(&attr);
 		break;
 	case BPF_OBJ_PIN:
 		err = bpf_obj_pin(&attr);
