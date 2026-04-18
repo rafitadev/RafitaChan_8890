@@ -831,6 +831,8 @@ static unsigned int __bpf_prog_run(const struct sk_buff *ctx, const struct bpf_i
 		[BPF_ALU | BPF_LSH | BPF_K] = &&ALU_LSH_K,
 		[BPF_ALU | BPF_RSH | BPF_X] = &&ALU_RSH_X,
 		[BPF_ALU | BPF_RSH | BPF_K] = &&ALU_RSH_K,
+		[BPF_ALU | BPF_ARSH | BPF_X] = &&ALU_ARSH_X,
+		[BPF_ALU | BPF_ARSH | BPF_K] = &&ALU_ARSH_K,
 		[BPF_ALU | BPF_XOR | BPF_X] = &&ALU_XOR_X,
 		[BPF_ALU | BPF_XOR | BPF_K] = &&ALU_XOR_K,
 		[BPF_ALU | BPF_MUL | BPF_X] = &&ALU_MUL_X,
@@ -996,6 +998,12 @@ select_insn:
 		CONT;
 	ALU64_ARSH_K:
 		(*(s64 *) &DST) >>= IMM;
+		CONT;
+	ALU_ARSH_X:
+		DST = (u32) (((s32) DST) >> SRC);
+		CONT;
+	ALU_ARSH_K:
+		DST = (u32) (((s32) DST) >> IMM);
 		CONT;
 	ALU64_MOD_X:
 		if (unlikely(SRC == 0))
