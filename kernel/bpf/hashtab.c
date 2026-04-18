@@ -1017,6 +1017,62 @@ static int htab_lru_map_delete_elem(struct bpf_map *map, void *key)
 	return ret;
 }
 
+static int __htab_map_lookup_and_delete_elem(struct bpf_map *map, void *key,
+					     void *value, bool is_lru)
+{
+	struct bpf_htab *htab = container_of(map, struct bpf_htab, map);
+	struct hlist_nulls_head *head;
+	struct bucket *b;
+	struct htab_elem *l;
+	unsigned long flags;
+	u32 hash, key_size;
+	int ret = -ENOENT;
+
+	WARN_ON_ONCE(!rcu_read_lock_held());
+
+	key_size = map->key_size;
+	hash = htab_map_hash(key, key_size);
+	b = __select_bucket(htab, hash);
+	head = &b->head;
+
+	raw_spin_lock_irqsave(&b->lock, flags);
+	l = lookup_elem_raw(head, hash, key, key_size);
+	if (l) {
+		if (htab_is_percpu(htab))
+			pcpu_copy_value(htab, htab_elem_get_ptr(l, key_size),
+					value, true);
+		else
+			memcpy(value, fd_htab_map_get_ptr(map, l),
+			       map->value_size);
+
+		hlist_nulls_del_rcu(&l->hash_node);
+		ret = 0;
+	}
+	raw_spin_unlock_irqrestore(&b->lock, flags);
+
+	if (!l)
+		return ret;
+
+	if (is_lru)
+		bpf_lru_push_free(&htab->lru, &l->lru_node);
+	else
+		free_htab_elem(htab, l);
+
+	return ret;
+}
+
+static int htab_map_lookup_and_delete_elem(struct bpf_map *map, void *key,
+					   void *value)
+{
+	return __htab_map_lookup_and_delete_elem(map, key, value, false);
+}
+
+static int htab_lru_map_lookup_and_delete_elem(struct bpf_map *map, void *key,
+					       void *value)
+{
+	return __htab_map_lookup_and_delete_elem(map, key, value, true);
+}
+
 static void delete_all_elements(struct bpf_htab *htab)
 {
 	int i;
@@ -1065,6 +1121,7 @@ static const struct bpf_map_ops htab_ops = {
 	.map_free = htab_map_free,
 	.map_get_next_key = htab_map_get_next_key,
 	.map_lookup_elem = htab_map_lookup_elem,
+	.map_lookup_and_delete_elem = htab_map_lookup_and_delete_elem,
 	.map_update_elem = htab_map_update_elem,
 	.map_delete_elem = htab_map_delete_elem,
 };
@@ -1079,6 +1136,7 @@ static const struct bpf_map_ops htab_lru_ops = {
 	.map_free = htab_map_free,
 	.map_get_next_key = htab_map_get_next_key,
 	.map_lookup_elem = htab_lru_map_lookup_elem,
+	.map_lookup_and_delete_elem = htab_lru_map_lookup_and_delete_elem,
 	.map_update_elem = htab_lru_map_update_elem,
 	.map_delete_elem = htab_lru_map_delete_elem,
 };
@@ -1166,6 +1224,7 @@ static const struct bpf_map_ops htab_percpu_ops = {
 	.map_free = htab_map_free,
 	.map_get_next_key = htab_map_get_next_key,
 	.map_lookup_elem = htab_percpu_map_lookup_elem,
+	.map_lookup_and_delete_elem = htab_map_lookup_and_delete_elem,
 	.map_update_elem = htab_percpu_map_update_elem,
 	.map_delete_elem = htab_map_delete_elem,
 };
@@ -1180,6 +1239,7 @@ static const struct bpf_map_ops htab_lru_percpu_ops = {
 	.map_free = htab_map_free,
 	.map_get_next_key = htab_map_get_next_key,
 	.map_lookup_elem = htab_lru_percpu_map_lookup_elem,
+	.map_lookup_and_delete_elem = htab_lru_map_lookup_and_delete_elem,
 	.map_update_elem = htab_lru_percpu_map_update_elem,
 	.map_delete_elem = htab_lru_map_delete_elem,
 };

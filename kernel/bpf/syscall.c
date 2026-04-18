@@ -457,6 +457,8 @@ int __weak bpf_stackmap_copy(struct bpf_map *map, void *key, void *value)
 	return -ENOTSUPP;
 }
 
+static int map_delete_elem(union bpf_attr *attr);
+
 /* last field in 'union bpf_attr' used by this command */
 #define BPF_MAP_LOOKUP_ELEM_LAST_FIELD value
 
@@ -533,6 +535,83 @@ static int map_lookup_elem(union bpf_attr *attr)
 
 	err = 0;
 
+free_value:
+	kfree(value);
+free_key:
+	kfree(key);
+err_put:
+	fdput(f);
+	return err;
+}
+
+/* last field in 'union bpf_attr' used by this command */
+#define BPF_MAP_LOOKUP_AND_DELETE_ELEM_LAST_FIELD value
+
+static int map_lookup_and_delete_elem(union bpf_attr *attr)
+{
+	void __user *ukey = u64_to_ptr(attr->key);
+	void __user *uvalue = u64_to_ptr(attr->value);
+	int ufd = attr->map_fd;
+	struct bpf_map *map;
+	void *key, *value;
+	u32 value_size;
+	struct fd f;
+	int err;
+
+	if (CHECK_ATTR(BPF_MAP_LOOKUP_AND_DELETE_ELEM))
+		return -EINVAL;
+
+	f = fdget(ufd);
+	map = __bpf_map_get(f);
+	if (IS_ERR(map))
+		return PTR_ERR(map);
+
+	if (!(f.file->f_mode & FMODE_CAN_READ) ||
+	    !(f.file->f_mode & FMODE_CAN_WRITE)) {
+		err = -EPERM;
+		goto err_put;
+	}
+
+	if (!map->ops->map_lookup_and_delete_elem) {
+		err = -ENOTSUPP;
+		goto err_put;
+	}
+
+	err = -ENOMEM;
+	key = kmalloc(map->key_size, GFP_USER);
+	if (!key)
+		goto err_put;
+
+	err = -EFAULT;
+	if (copy_from_user(key, ukey, map->key_size) != 0)
+		goto free_key;
+
+	if (map->map_type == BPF_MAP_TYPE_PERCPU_HASH ||
+	    map->map_type == BPF_MAP_TYPE_LRU_PERCPU_HASH)
+		value_size = round_up(map->value_size, 8) * num_possible_cpus();
+	else
+		value_size = map->value_size;
+
+	err = -ENOMEM;
+	value = kmalloc(value_size, GFP_USER | __GFP_NOWARN);
+	if (!value)
+		goto free_key;
+
+	preempt_disable();
+	__this_cpu_inc(bpf_prog_active);
+	rcu_read_lock();
+	err = map->ops->map_lookup_and_delete_elem(map, key, value);
+	rcu_read_unlock();
+	__this_cpu_dec(bpf_prog_active);
+	preempt_enable();
+	if (err)
+		goto free_value;
+
+	err = -EFAULT;
+	if (copy_to_user(uvalue, value, value_size) != 0)
+		goto free_value;
+
+	err = 0;
 free_value:
 	kfree(value);
 free_key:
@@ -1623,6 +1702,9 @@ SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, siz
 		break;
 	case BPF_MAP_LOOKUP_ELEM:
 		err = map_lookup_elem(&attr);
+		break;
+	case BPF_MAP_LOOKUP_AND_DELETE_ELEM:
+		err = map_lookup_and_delete_elem(&attr);
 		break;
 	case BPF_MAP_UPDATE_ELEM:
 		err = map_update_elem(&attr);
