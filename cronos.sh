@@ -552,7 +552,7 @@ echo "1) Selinux Permissive " "2) Selinux Enforcing"
 echo " "
 read -p "Please select your SElinux mode (1-2) > " CR_SELINUX
 echo " "
-read -p "Enable KernelSU? (y/n) > " CR_KSU
+read -p "Enable SukiSU-Ultra? (y/n) > " CR_KSU
 echo " "
 if [ "$CR_TARGET" = "6" ]; then
 echo "Build Aborted"
