@@ -156,8 +156,11 @@ int cgroup_bpf_inherit(struct cgroup *cgrp)
 	struct bpf_prog_array __rcu *arrays[NR] = {};
 	int i;
 
-	for (i = 0; i < NR; i++)
+	cgrp->bpf.inactive = NULL;
+	for (i = 0; i < NR; i++) {
 		INIT_LIST_HEAD(&cgrp->bpf.progs[i]);
+		cgrp->bpf.flags[i] = 0;
+	}
 
 	for (i = 0; i < NR; i++)
 		if (compute_effective_progs(cgrp, i, &arrays[i]))
@@ -195,6 +198,9 @@ int __cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,
 	u32 old_flags;
 	int err;
 
+	if (flags & ~BPF_F_ATTACH_MASK)
+		return -EINVAL;
+
 	if ((flags & BPF_F_ALLOW_OVERRIDE) && (flags & BPF_F_ALLOW_MULTI))
 		/* invalid combination */
 		return -EINVAL;
@@ -207,7 +213,7 @@ int __cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,
 		 * of existing overridable in this cgroup.
 		 * Disallow attaching multi-prog if overridable or none
 		 */
-		return -EPERM;
+		return -EINVAL;
 
 	if (prog_list_length(progs) >= BPF_CGROUP_MAX_PROGS)
 		return -E2BIG;
@@ -450,6 +456,7 @@ int __cgroup_bpf_run_filter(struct sock *sk,
 			    enum bpf_attach_type type)
 {
 	unsigned int offset = skb->data - skb_network_header(skb);
+	struct bpf_prog_array *array;
 	struct sock *save_sk;
 	struct cgroup *cgrp;
 	int ret;
@@ -464,8 +471,13 @@ int __cgroup_bpf_run_filter(struct sock *sk,
 	save_sk = skb->sk;
 	skb->sk = sk;
 	__skb_push(skb, offset);
-	ret = BPF_PROG_RUN_ARRAY(cgrp->bpf.effective[type], skb,
-				 bpf_prog_run_save_cb);
+	rcu_read_lock();
+	array = rcu_dereference(cgrp->bpf.effective[type]);
+	if (array)
+		ret = BPF_PROG_RUN_ARRAY(array, skb, bpf_prog_run_save_cb);
+	else
+		ret = 1;
+	rcu_read_unlock();
 	__skb_pull(skb, offset);
 	skb->sk = save_sk;
 	return ret == 1 ? 0 : -EPERM;
@@ -496,6 +508,7 @@ int __cgroup_bpf_run_filter_sock_addr(struct sock *sk,
 		.t_ctx = t_ctx,
 	};
 	struct sockaddr_storage unspec;
+	struct bpf_prog_array *array;
 	struct cgroup *cgrp;
 	int ret;
 
@@ -511,7 +524,13 @@ int __cgroup_bpf_run_filter_sock_addr(struct sock *sk,
 	}
 
 	cgrp = sock_cgroup_ptr(&sk->sk_cgrp_data);
-	ret = BPF_PROG_RUN_ARRAY(cgrp->bpf.effective[type], &ctx, BPF_PROG_RUN);
+	rcu_read_lock();
+	array = rcu_dereference(cgrp->bpf.effective[type]);
+	if (array)
+		ret = BPF_PROG_RUN_ARRAY(array, &ctx, BPF_PROG_RUN);
+	else
+		ret = 1;
+	rcu_read_unlock();
 
 	return ret == 1 ? 0 : -EPERM;
 }
@@ -729,16 +748,17 @@ int __cgroup_bpf_run_filter_sk(struct sock *sk,
 			       enum bpf_attach_type type)
 {
 	struct cgroup *cgrp = sock_cgroup_ptr(&sk->sk_cgrp_data);
-	struct bpf_prog *prog;
+	struct bpf_prog_array *array;
 	int ret = 0;
 
+	if (sk->sk_family != AF_INET && sk->sk_family != AF_INET6)
+		return 0;
 
 	rcu_read_lock();
-
-	prog = rcu_dereference(cgrp->bpf.effective[type]->progs[0]);
-	if (prog)
-		ret = BPF_PROG_RUN(prog, sk) == 1 ? 0 : -EPERM;
-
+	array = rcu_dereference(cgrp->bpf.effective[type]);
+	if (array)
+		ret = BPF_PROG_RUN_ARRAY(array, sk, BPF_PROG_RUN) == 1 ?
+		      0 : -EPERM;
 	rcu_read_unlock();
 
 	return ret;

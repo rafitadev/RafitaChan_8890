@@ -550,6 +550,12 @@ static inline bool cgroup_is_populated(struct cgroup *cgrp)
 	return cgrp->populated_cnt;
 }
 
+/* no synchronization, hint helper for hot-path checks */
+static inline bool cgroup_is_alive(struct cgroup *cgrp)
+{
+	return cgrp->self.flags & CSS_ONLINE;
+}
+
 /* returns ino associated with a cgroup */
 static inline ino_t cgroup_ino(struct cgroup *cgrp)
 {

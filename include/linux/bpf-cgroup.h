@@ -101,7 +101,7 @@ int __cgroup_bpf_run_filter_getsockopt(struct sock *sk, int level,
 #define BPF_CGROUP_RUN_PROG_INET_SOCK(sk)				       \
 ({									       \
 	int __ret = 0;							       \
-	if (cgroup_bpf_enabled && sk) {					       \
+	if (cgroup_bpf_enabled && sk && sk_fullsock(sk)) {		       \
 		__ret = __cgroup_bpf_run_filter_sk(sk,			       \
 						 BPF_CGROUP_INET_SOCK_CREATE); \
 	}								       \
