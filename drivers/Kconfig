@@ -216,5 +216,6 @@ source "drivers/gator/Kconfig"
 
 source "drivers/ccic/Kconfig"
 
+# KernelSU / Sukisu feature set
 source "drivers/kernelsu/Kconfig"
 endmenu

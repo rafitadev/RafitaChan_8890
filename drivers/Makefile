@@ -201,5 +201,6 @@ obj-y                           += motor/
 # CCIC
 obj-y	+= ccic/
 
-# KernelSU
-obj-$(CONFIG_KSU) += kernelsu/
+# KernelSU (Sukisu-style integration keeps this directory always visited;
+# actual objects still depend on CONFIG_KSU inside drivers/kernelsu/Makefile)
+obj-y += kernelsu/

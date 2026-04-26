@@ -2342,9 +2342,9 @@ struct hmp_data_struct {
 	struct attribute_group attr_group;
 	struct attribute *attributes[HMP_DATA_SYSFS_MAX + 1];
 	struct hmp_global_attr attr[HMP_DATA_SYSFS_MAX];
-} hmp_data = {.multiplier = 1 << HMP_VARIABLE_SCALE_SHIFT,
-	      .semiboost_multiplier = 2 << HMP_VARIABLE_SCALE_SHIFT,
-	      .rq_multiplier = 4 << HMP_VARIABLE_SCALE_SHIFT};
+} hmp_data = {.multiplier = (3 << HMP_VARIABLE_SCALE_SHIFT) / 2,
+	      .semiboost_multiplier = (5 << HMP_VARIABLE_SCALE_SHIFT) / 2,
+	      .rq_multiplier = 6 << HMP_VARIABLE_SCALE_SHIFT};
 
 static u64 hmp_variable_scale_convert(u64 delta);
 static u64 hmp_rq_variable_scale_convert(u64 delta);
@@ -2706,11 +2706,11 @@ static inline void update_rq_runnable_avg(struct rq *rq, int runnable) {}
  * tweaking suit particular needs.
  */
 
-unsigned int hmp_up_threshold = 700;
-unsigned int hmp_down_threshold = 256;
+unsigned int hmp_up_threshold = 620;
+unsigned int hmp_down_threshold = 180;
 
-unsigned int hmp_semiboost_up_threshold = 400;
-unsigned int hmp_semiboost_down_threshold = 150;
+unsigned int hmp_semiboost_up_threshold = 320;
+unsigned int hmp_semiboost_down_threshold = 100;
 
 #ifdef CONFIG_SCHED_HMP_DOWN_MIGRATION_COMPENSATION
 #include <linux/pm_qos.h>

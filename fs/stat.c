@@ -87,8 +87,9 @@ int vfs_fstat(unsigned int fd, struct kstat *stat)
 }
 EXPORT_SYMBOL(vfs_fstat);
 
-#if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
-extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
+#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_KPROBES_KSUD)
+extern __attribute__((hot)) int
+ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
 #endif
 
 int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,
@@ -98,7 +99,7 @@ int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,
 	int error = -EINVAL;
 	unsigned int lookup_flags = 0;
 	
-#if defined(CONFIG_KSU) && !defined(CONFIG_KPROBES)
+#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_KPROBES_KSUD)
 	ksu_handle_stat(&dfd, &filename, &flag);
 #endif
 

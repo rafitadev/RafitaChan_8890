@@ -131,7 +131,10 @@ static int gpu_dvfs_governor_interactive(struct exynos_context *platform, int ut
 		int highspeed_level = gpu_dvfs_get_level(platform->interactive.highspeed_clock);
 		if ((highspeed_level > 0) && (platform->step > highspeed_level)
 				&& (utilization > platform->interactive.highspeed_load)) {
-			if (platform->interactive.delay_count == platform->interactive.highspeed_delay) {
+			if (utilization > (platform->interactive.highspeed_load + 10)) {
+				platform->step = highspeed_level;
+				platform->interactive.delay_count = 0;
+			} else if (platform->interactive.delay_count >= platform->interactive.highspeed_delay) {
 				platform->step = highspeed_level;
 				platform->interactive.delay_count = 0;
 			} else {
@@ -208,13 +211,13 @@ static int gpu_dvfs_governor_booster(struct exynos_context *platform, int utiliz
 
 	cur_weight = platform->cur_clock*utilization;
 	/* booster_threshold = current clock * set the percentage of utilization */
-	booster_threshold = platform->cur_clock * 50;
+	booster_threshold = platform->cur_clock * 40;
 
 	dvfs_table_lock = gpu_dvfs_get_level(platform->gpu_max_clock);
 
-	if ((platform->step >= dvfs_table_lock+2) &&
+	if ((platform->step >= dvfs_table_lock+3) &&
 			((cur_weight - weight) > booster_threshold)) {
-		platform->step -= 2;
+		platform->step -= 3;
 		platform->down_requirement = platform->table[platform->step].down_staycount;
 		GPU_LOG(DVFS_WARNING, DUMMY, 0u, 0u, "Booster Governor: G3D level 2 step\n");
 	} else if ((platform->step > gpu_dvfs_get_level(platform->gpu_max_clock)) &&

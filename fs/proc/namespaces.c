@@ -33,6 +33,8 @@ static const struct proc_ns_operations *ns_entries[] = {
 #endif
 };
 
+#define NS_ENTRIES_COUNT ARRAY_SIZE(ns_entries)
+
 static void *proc_ns_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	struct inode *inode = dentry->d_inode;
@@ -116,10 +118,10 @@ static int proc_ns_dir_readdir(struct file *file, struct dir_context *ctx)
 
 	if (!dir_emit_dots(file, ctx))
 		goto out;
-	if (ctx->pos >= 2 + ARRAY_SIZE(ns_entries))
+	if (ctx->pos >= 2 + NS_ENTRIES_COUNT)
 		goto out;
 	entry = ns_entries + (ctx->pos - 2);
-	last = &ns_entries[ARRAY_SIZE(ns_entries) - 1];
+	last = &ns_entries[NS_ENTRIES_COUNT - 1];
 	while (entry <= last) {
 		const struct proc_ns_operations *ops = *entry;
 		if (!proc_fill_cache(file, ctx, ops->name, strlen(ops->name),
@@ -151,7 +153,7 @@ static struct dentry *proc_ns_dir_lookup(struct inode *dir,
 	if (!task)
 		goto out_no_task;
 
-	last = &ns_entries[ARRAY_SIZE(ns_entries)];
+	last = &ns_entries[NS_ENTRIES_COUNT];
 	for (entry = ns_entries; entry < last; entry++) {
 		if (strlen((*entry)->name) != len)
 			continue;
