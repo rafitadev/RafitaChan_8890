@@ -75,6 +75,8 @@ CR_ROOT="0"
 CR_SELINUX="1"
 CR_BOMB="0"
 CR_KSU="n"
+CR_KSU_MANUAL_HOOK="y"
+CR_KSU_KPROBES_KSUD="n"
 CR_CLEAN="n"
 # Default to OneUI-Q
 CR_CONFIG_VAR=$CR_CONFIG_ONEUI
@@ -91,6 +93,28 @@ CR_LINARO=~/Exynos8890-source-tools/compiler/gcc/gcc-linaro-4.9.4-arm64/bin/aarc
 CR_LINARO6=~/Exynos8890-source-tools/compiler/gcc/gcc-linaro-6.5.0-arm64/bin/aarch64-linux-gnu-
 #####################################################
 
+KSU_DEFCONFIG_FILE=
+
+SET_KCONFIG()
+{
+  local file=$1
+  local mode=$2
+  local key=$3
+
+  if [ ! -x "$CR_DIR/scripts/config" ] || [ ! -f "$file" ]; then
+    return
+  fi
+
+  case "$mode" in
+    enable)
+      "$CR_DIR/scripts/config" --file "$file" -e "$key"
+      ;;
+    disable)
+      "$CR_DIR/scripts/config" --file "$file" -d "$key"
+      ;;
+  esac
+}
+
 # Compiler Selection
 BUILD_COMPILER()
 {
@@ -98,29 +122,34 @@ if [ $CR_COMPILER = "1" ]; then
 export CROSS_COMPILE=$CR_GCC4
 compile="make"
 CR_COMPILER="$CR_GCC4"
+export KCFLAGS="-O3 -pipe"
 fi
 if [ $CR_COMPILER = "2" ]; then
 export CROSS_COMPILE=$CR_LINARO
 compile="make"
 CR_COMPILER="$CR_LINARO"
+export KCFLAGS="-O3 -pipe"
 fi
 if [ $CR_COMPILER = "3" ]; then
 export CROSS_COMPILE=$CR_GCC9
 compile="make"
 CR_COMPILER="$CR_GCC9"
+export KCFLAGS="-O3 -pipe"
 fi
 if [ $CR_COMPILER = "4" ]; then
 export CROSS_COMPILE=$CR_GCC12
 compile="make"
 CR_COMPILER="$CR_GCC12"
+export KCFLAGS="-O3 -pipe"
 fi
 if [ $CR_COMPILER = "5" ]; then
 export CLANG_PATH=$CR_CLANG
 export CROSS_COMPILE=$CR_GCC11
 export CLANG_TRIPLE=aarch64-linux-gnu-
-compile="make CC=clang ARCH=arm64"
+compile="make CC=clang LLVM=1 LLVM_IAS=1 ARCH=arm64"
 export PATH=${CLANG_PATH}:${PATH}
 CR_COMPILER="$CR_CLANG"
+export KCFLAGS="-O3 -pipe"
 fi
 }
 
@@ -195,6 +224,7 @@ BUILD_GENERATE_CONFIG()
   # CronosKernel Custom defconfig
   echo " Copy $CR_CONFIG_CRONOS "
   cat $CR_DIR/arch/$CR_ARCH/configs/$CR_CONFIG_CRONOS >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
+  KSU_DEFCONFIG_FILE="$CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig"
   # Selinux Never Enforce all targets
   if [ $CR_SELINUX = "1" ]; then
     echo " Building Permissive Kernel"
@@ -215,12 +245,28 @@ BUILD_GENERATE_CONFIG()
   fi
   if [ $CR_KSU = "y" ]; then
     echo " Building KernelSU Kernel"
-    echo "CONFIG_KSU=y" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
-    echo "CONFIG_KSU_TAMPER_SYSCALL_TABLE=y" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
+    SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU
+    SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU_TAMPER_SYSCALL_TABLE
+    if [ "$CR_KSU_MANUAL_HOOK" = "y" ]; then
+      SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU_MANUAL_HOOK
+      SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_KPROBES_HOOK
+      SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_KPROBES_KSUD
+    else
+      SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_MANUAL_HOOK
+      SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU_KPROBES_HOOK
+      if [ "$CR_KSU_KPROBES_KSUD" = "y" ]; then
+        SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU_KPROBES_KSUD
+      else
+        SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_KPROBES_KSUD
+      fi
+    fi
     CR_IMAGE_NAME=$CR_IMAGE_NAME-ksu
     zver=$zver-KernelSU
   else
-    echo "# CONFIG_KSU is not set" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
+    SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU
+    SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_MANUAL_HOOK
+    SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_KPROBES_HOOK
+    SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_KPROBES_KSUD
   fi
   echo " Set $CR_VARIANT to generated config "
   CR_CONFIG=tmp_defconfig
@@ -592,4 +638,3 @@ fi
 #     CR_IMAGE_NAME=$CR_IMAGE_NAME-KernelSU
 #fi
 #}
-

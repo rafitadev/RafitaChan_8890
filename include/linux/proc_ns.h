@@ -11,6 +11,7 @@ struct nsproxy;
 struct path;
 struct task_struct;
 struct inode;
+struct user_namespace;
 
 struct proc_ns_operations {
 	const char *name;

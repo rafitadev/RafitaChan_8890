@@ -30,24 +30,24 @@ endif
 
 ifdef KSU_MANAGER_PACKAGE
 ccflags-y += -DKSU_MANAGER_PACKAGE=\"$(KSU_MANAGER_PACKAGE)\"
-$(info -- KernelSU Manager package name: $(KSU_MANAGER_PACKAGE))
+$(info -- SukiSU-Ultra Manager package name: $(KSU_MANAGER_PACKAGE))
 endif
 
-$(info -- KernelSU Manager signature size: $(KSU_EXPECTED_SIZE))
-$(info -- KernelSU Manager signature hash: $(KSU_EXPECTED_HASH))
+$(info -- SukiSU-Ultra Manager signature size: $(KSU_EXPECTED_SIZE))
+$(info -- SukiSU-Ultra Manager signature hash: $(KSU_EXPECTED_HASH))
 
 ccflags-y += -DEXPECTED_SIZE=$(KSU_EXPECTED_SIZE)
 ccflags-y += -DEXPECTED_HASH=\"$(KSU_EXPECTED_HASH)\"
 
 # UL, look for iterate_dir on ‎fs/readdir.c
 ifeq ($(shell grep -q "^int iterate_dir" $(srctree)/fs/readdir.c 2>/dev/null; echo $$?),0)
-$(info -- KernelSU/compat: iterate_dir found!)
+$(info -- SukiSU-Ultra/compat: iterate_dir found!)
 ccflags-y += -DKSU_HAS_ITERATE_DIR
 endif
 
 # UL, look for read_iter on f_op struct
 ifeq ($(shell grep -q "read_iter" $(srctree)/include/linux/fs.h 2>/dev/null; echo $$?),0)
-$(info -- KernelSU/compat: f_op->read_iter found!)
+$(info -- SukiSU-Ultra/compat: f_op->read_iter found!)
 ccflags-y += -DKSU_HAS_FOP_READ_ITER
 endif
 
@@ -57,22 +57,22 @@ ccflags-y += -DKSU_HAS_MODERN_EXT4
 endif
 
 ifeq ($(shell grep -q "int path_umount" $(srctree)/fs/namespace.c; echo $$?),0)
-$(info -- KernelSU/compat: path_umount found)
+$(info -- SukiSU-Ultra/compat: path_umount found)
 ccflags-y += -DKSU_HAS_PATH_UMOUNT
 endif
 
 ifeq ($(shell grep -q "selinux_inode" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
-$(info -- KernelSU/compat: selinux_inode() found)
+$(info -- SukiSU-Ultra/compat: selinux_inode() found)
 ccflags-y += -DKSU_HAS_SELINUX_INODE
 endif
 
 ifeq ($(shell grep -q "selinux_cred" $(srctree)/security/selinux/include/objsec.h; echo $$?),0)
-$(info -- KernelSU/compat: selinux_cred() found)
+$(info -- SukiSU-Ultra/compat: selinux_cred() found)
 ccflags-y += -DKSU_HAS_SELINUX_CRED
 endif
 
 ifeq ($(shell grep -q "static inline struct inode \*file_inode" $(srctree)/include/linux/fs.h; echo $$?),0)
-$(info -- KernelSU/compat: file_inode() found)
+$(info -- SukiSU-Ultra/compat: file_inode() found)
 ccflags-y += -DKSU_UL_HAS_FILE_INODE
 endif
 

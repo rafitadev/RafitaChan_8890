@@ -650,6 +650,13 @@ static void css_set_move_task(struct task_struct *task,
 {
 	lockdep_assert_held(&css_set_lock);
 
+	/*
+	 * Common fast path for attach/write callers which resolve to the
+	 * current css_set.  Avoid iterator churn and list traffic.
+	 */
+	if (from_cset == to_cset && !use_mg_tasks)
+		return;
+
 	if (to_cset && !css_set_populated(to_cset))
 		css_set_update_populated(to_cset, true);
 
@@ -5033,6 +5040,7 @@ static void css_release_work_fn(struct work_struct *work)
 		container_of(work, struct cgroup_subsys_state, destroy_work);
 	struct cgroup_subsys *ss = css->ss;
 	struct cgroup *cgrp = css->cgroup;
+	bool cgrp_needs_bpf_put = false;
 
 	mutex_lock(&cgroup_mutex);
 
@@ -5061,11 +5069,18 @@ static void css_release_work_fn(struct work_struct *work)
 		if (cgrp->kn)
 			RCU_INIT_POINTER(*(void __rcu __force **)&cgrp->kn->priv,
 					 NULL);
-
-		cgroup_bpf_put(cgrp);
+		cgrp_needs_bpf_put = true;
 	}
 
 	mutex_unlock(&cgroup_mutex);
+
+	/*
+	 * Keep cgroup_mutex hold-time short in release path.  bpf array free
+	 * paths may involve RCU grace waiting and don't need cgroup_mutex once
+	 * the cgroup is already detached from lookup paths.
+	 */
+	if (cgrp_needs_bpf_put)
+		cgroup_bpf_put(cgrp);
 
 	call_rcu(&css->rcu_head, css_free_rcu_fn);
 }

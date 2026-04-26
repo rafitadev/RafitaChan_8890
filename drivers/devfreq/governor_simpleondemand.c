@@ -34,9 +34,9 @@ static int devfreq_simple_ondemand_notifier(struct notifier_block *nb, unsigned 
 }
 
 /* Default constants for DevFreq-Simple-Ondemand (DFSO) */
-#define DFSO_UPTHRESHOLD	(90)
-#define DFSO_DOWNDIFFERENCTIAL	(5)
-#define DFSO_WEIGHT		(100)
+#define DFSO_UPTHRESHOLD	(70)
+#define DFSO_DOWNDIFFERENCTIAL	(10)
+#define DFSO_WEIGHT		(120)
 static int devfreq_simple_ondemand_func(struct devfreq *df,
 					unsigned long *freq)
 {

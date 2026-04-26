@@ -59,10 +59,10 @@ static short lowmem_adj[6] = {
 };
 static int lowmem_adj_size = 4;
 static int lowmem_minfree[6] = {
-	3 * 512,	/* 6MB */
-	2 * 1024,	/* 8MB */
-	4 * 1024,	/* 16MB */
+	6 * 512,	/* 12MB */
+	3 * 2048,	/* 24MB */
 	16 * 1024,	/* 64MB */
+	24 * 1024,	/* 96MB */
 };
 static int lowmem_minfree_size = 4;
 static u32 lowmem_lmkcount;
@@ -182,7 +182,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 			task_unlock(p);
 			rcu_read_unlock();
 			/* give the system time to free up the memory */
-			msleep_interruptible(20);
+			msleep_interruptible(10);
 			return 0;
 		}
 		oom_score_adj = p->signal->oom_score_adj;
@@ -242,7 +242,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		lowmem_lmkcount++;
 		rcu_read_unlock();
 		/* give the system time to free up the memory */
-		msleep_interruptible(20);
+		msleep_interruptible(10);
 
 		if (reclaim_state)
 			reclaim_state->reclaimed_slab += selected_tasksize;
