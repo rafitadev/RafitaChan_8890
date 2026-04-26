@@ -217,7 +217,11 @@ static int zs_size_classes;
  *
  * (see: fix_fullness_group())
  */
-static const int fullness_threshold_frac = 4;
+/*
+ * Bias class migration a bit earlier to keep more zspages in reclaimable
+ * buckets under sustained swap pressure (zram heavy workloads).
+ */
+static const int fullness_threshold_frac = 3;
 
 struct size_class {
 	/*

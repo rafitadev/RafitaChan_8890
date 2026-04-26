@@ -22,12 +22,17 @@
 #include <linux/printk.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 
 #include <asm/byteorder.h>
 #include <asm/cacheflush.h>
 #include <asm/debug-monitors.h>
 
 #include "bpf_jit.h"
+
+#ifndef BPF_JMP32
+#define BPF_JMP32	0x06
+#endif
 
 #define TMP_REG_1 (MAX_BPF_REG + 0)
 #define TMP_REG_2 (MAX_BPF_REG + 1)
@@ -246,6 +251,7 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx)
 	const s16 off = insn->off;
 	const s32 imm = insn->imm;
 	const int i = insn - ctx->prog->insnsi;
+	const bool is_jmp64 = BPF_CLASS(code) == BPF_JMP;
 	const bool is64 = BPF_CLASS(code) == BPF_ALU64;
 	u8 jmp_cond;
 	s32 jmp_offset;
@@ -457,10 +463,24 @@ emit_bswap_uxt:
 	case BPF_JMP | BPF_JEQ | BPF_X:
 	case BPF_JMP | BPF_JGT | BPF_X:
 	case BPF_JMP | BPF_JGE | BPF_X:
+	case BPF_JMP | BPF_JLT | BPF_X:
+	case BPF_JMP | BPF_JLE | BPF_X:
 	case BPF_JMP | BPF_JNE | BPF_X:
 	case BPF_JMP | BPF_JSGT | BPF_X:
 	case BPF_JMP | BPF_JSGE | BPF_X:
-		emit(A64_CMP(1, dst, src), ctx);
+	case BPF_JMP | BPF_JSLT | BPF_X:
+	case BPF_JMP | BPF_JSLE | BPF_X:
+	case BPF_JMP32 | BPF_JEQ | BPF_X:
+	case BPF_JMP32 | BPF_JGT | BPF_X:
+	case BPF_JMP32 | BPF_JGE | BPF_X:
+	case BPF_JMP32 | BPF_JLT | BPF_X:
+	case BPF_JMP32 | BPF_JLE | BPF_X:
+	case BPF_JMP32 | BPF_JNE | BPF_X:
+	case BPF_JMP32 | BPF_JSGT | BPF_X:
+	case BPF_JMP32 | BPF_JSGE | BPF_X:
+	case BPF_JMP32 | BPF_JSLT | BPF_X:
+	case BPF_JMP32 | BPF_JSLE | BPF_X:
+		emit(A64_CMP(is_jmp64, dst, src), ctx);
 emit_cond_jmp:
 		jmp_offset = bpf2a64_offset(i + off, i, ctx);
 		check_imm19(jmp_offset);
@@ -474,6 +494,12 @@ emit_cond_jmp:
 		case BPF_JGE:
 			jmp_cond = A64_COND_CS;
 			break;
+		case BPF_JLT:
+			jmp_cond = A64_COND_CC;
+			break;
+		case BPF_JLE:
+			jmp_cond = A64_COND_LS;
+			break;
 		case BPF_JNE:
 			jmp_cond = A64_COND_NE;
 			break;
@@ -483,29 +509,51 @@ emit_cond_jmp:
 		case BPF_JSGE:
 			jmp_cond = A64_COND_GE;
 			break;
+		case BPF_JSLT:
+			jmp_cond = A64_COND_LT;
+			break;
+		case BPF_JSLE:
+			jmp_cond = A64_COND_LE;
+			break;
 		default:
 			return -EFAULT;
 		}
 		emit(A64_B_(jmp_cond, jmp_offset), ctx);
 		break;
 	case BPF_JMP | BPF_JSET | BPF_X:
-		emit(A64_TST(1, dst, src), ctx);
+	case BPF_JMP32 | BPF_JSET | BPF_X:
+		emit(A64_TST(is_jmp64, dst, src), ctx);
 		goto emit_cond_jmp;
 	/* IF (dst COND imm) JUMP off */
 	case BPF_JMP | BPF_JEQ | BPF_K:
 	case BPF_JMP | BPF_JGT | BPF_K:
 	case BPF_JMP | BPF_JGE | BPF_K:
+	case BPF_JMP | BPF_JLT | BPF_K:
+	case BPF_JMP | BPF_JLE | BPF_K:
 	case BPF_JMP | BPF_JNE | BPF_K:
 	case BPF_JMP | BPF_JSGT | BPF_K:
 	case BPF_JMP | BPF_JSGE | BPF_K:
+	case BPF_JMP | BPF_JSLT | BPF_K:
+	case BPF_JMP | BPF_JSLE | BPF_K:
+	case BPF_JMP32 | BPF_JEQ | BPF_K:
+	case BPF_JMP32 | BPF_JGT | BPF_K:
+	case BPF_JMP32 | BPF_JGE | BPF_K:
+	case BPF_JMP32 | BPF_JLT | BPF_K:
+	case BPF_JMP32 | BPF_JLE | BPF_K:
+	case BPF_JMP32 | BPF_JNE | BPF_K:
+	case BPF_JMP32 | BPF_JSGT | BPF_K:
+	case BPF_JMP32 | BPF_JSGE | BPF_K:
+	case BPF_JMP32 | BPF_JSLT | BPF_K:
+	case BPF_JMP32 | BPF_JSLE | BPF_K:
 		ctx->tmp_used = 1;
-		emit_a64_mov_i(1, tmp, imm, ctx);
-		emit(A64_CMP(1, dst, tmp), ctx);
+		emit_a64_mov_i(is_jmp64, tmp, imm, ctx);
+		emit(A64_CMP(is_jmp64, dst, tmp), ctx);
 		goto emit_cond_jmp;
 	case BPF_JMP | BPF_JSET | BPF_K:
+	case BPF_JMP32 | BPF_JSET | BPF_K:
 		ctx->tmp_used = 1;
-		emit_a64_mov_i(1, tmp, imm, ctx);
-		emit(A64_TST(1, dst, tmp), ctx);
+		emit_a64_mov_i(is_jmp64, tmp, imm, ctx);
+		emit(A64_TST(is_jmp64, dst, tmp), ctx);
 		goto emit_cond_jmp;
 	/* function call */
 	case BPF_JMP | BPF_CALL:
@@ -740,6 +788,23 @@ static inline void bpf_flush_icache(void *start, void *end)
 	flush_icache_range((unsigned long)start, (unsigned long)end);
 }
 
+static struct bpf_binary_header *bpf_jit_alloc_exec(unsigned int proglen,
+						     u8 **image_ptr)
+{
+	return bpf_jit_binary_alloc(proglen, image_ptr, sizeof(u32),
+				    jit_fill_hole);
+}
+
+static void bpf_jit_free_exec(struct bpf_binary_header *header)
+{
+	bpf_jit_binary_free(header);
+}
+
+u64 bpf_jit_alloc_exec_limit(void)
+{
+	return VMALLOC_END - VMALLOC_START;
+}
+
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 {
 	struct bpf_binary_header *header;
@@ -747,7 +812,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	int image_size;
 	u8 *image_ptr;
 
-	if (!bpf_jit_enable)
+	if (!bpf_jit_enable && !IS_BUILTIN(CONFIG_BPF_JIT_ALWAYS_ON))
 		return prog;
 
 	memset(&ctx, 0, sizeof(ctx));
@@ -770,8 +835,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 
 	/* Now we know the actual image size. */
 	image_size = sizeof(u32) * ctx.idx;
-	header = bpf_jit_binary_alloc(image_size, &image_ptr,
-				      sizeof(u32), jit_fill_hole);
+	header = bpf_jit_alloc_exec(image_size, &image_ptr);
 	if (header == NULL)
 		goto out;
 
@@ -783,7 +847,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	build_prologue(&ctx);
 
 	if (build_body(&ctx)) {
-		bpf_jit_binary_free(header);
+		bpf_jit_free_exec(header);
 		goto out;
 	}
 
