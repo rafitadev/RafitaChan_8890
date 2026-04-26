@@ -16,6 +16,15 @@
 #include <linux/bpf-cgroup.h>
 #include <net/sock.h>
 #include <net/bpf_sk_storage.h>
+#ifndef BPF_F_ALLOW_OVERRIDE
+#define BPF_F_ALLOW_OVERRIDE (1U << 0)
+#endif
+#ifndef BPF_F_ALLOW_MULTI
+#define BPF_F_ALLOW_MULTI (1U << 1)
+#endif
+#ifndef BPF_F_ATTACH_MASK
+#define BPF_F_ATTACH_MASK (BPF_F_ALLOW_OVERRIDE | BPF_F_ALLOW_MULTI)
+#endif
 
 DEFINE_STATIC_KEY_FALSE(cgroup_bpf_enabled_key);
 EXPORT_SYMBOL(cgroup_bpf_enabled_key);
