@@ -264,7 +264,7 @@ extern void exynos_ss_get_softlockup_info(unsigned int cpu, void *info);
 #else
 #define exynos_ss_task(a,b)		do { } while(0)
 #define exynos_ss_work(a,b,c,d)		do { } while(0)
-#define exynos_ss_clockevent(a,b,c)	do { } while(0)
+#define exynos_ss_clockevent(a,b,c,d)	do { } while(0)
 #define exynos_ss_cpuidle(a,b,c,d)	do { } while(0)
 #define exynos_ss_suspend(a,b,c)	do { } while(0)
 #define exynos_ss_regulator(a,b,c,d)	do { } while(0)
