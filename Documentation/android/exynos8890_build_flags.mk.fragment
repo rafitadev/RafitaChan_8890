@@ -1,0 +1,12 @@
+# Exynos8890 build optimization flags (GCC 4.9/6 era, kernel 3.18)
+# Use as: make KCFLAGS="$(cat this_fragment | tr '\n' ' ')" ...
+# WARNING: -Ofast can break strict kernel semantics on some compilers.
+
+# Conservative high-performance profile
+KCFLAGS += -O3
+KCFLAGS += -mcpu=exynos-m1 -mtune=exynos-m1
+KCFLAGS += -fgraphite-identity -floop-block -floop-interchange
+KCFLAGS += -fno-semantic-interposition
+
+# Optional aggressive profile (test-only)
+# KCFLAGS += -Ofast -fno-math-errno -funsafe-math-optimizations

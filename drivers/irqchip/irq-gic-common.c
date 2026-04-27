@@ -21,6 +21,8 @@
 
 #include "irq-gic-common.h"
 
+#define GICD_INT_LOWLAT_PRI_X4	0x80808080
+
 void gic_configure_irq(unsigned int irq, unsigned int type,
 		       void __iomem *base, void (*sync_access)(void))
 {
@@ -81,7 +83,7 @@ void __init gic_dist_config(void __iomem *base, int gic_irqs,
 	 * Set priority on all global interrupts.
 	 */
 	for (i = 32; i < gic_irqs; i += 4)
-		writel_relaxed(GICD_INT_DEF_PRI_X4, base + GIC_DIST_PRI + i);
+		writel_relaxed(GICD_INT_LOWLAT_PRI_X4, base + GIC_DIST_PRI + i);
 
 	/*
 	 * Disable all interrupts.  Leave the PPI and SGIs alone
@@ -110,7 +112,7 @@ void gic_cpu_config(void __iomem *base, void (*sync_access)(void))
 	 * Set priority on PPI and SGI interrupts
 	 */
 	for (i = 0; i < 32; i += 4)
-		writel_relaxed(GICD_INT_DEF_PRI_X4,
+		writel_relaxed(GICD_INT_LOWLAT_PRI_X4,
 					base + GIC_DIST_PRI + i * 4 / 4);
 
 	if (sync_access)

@@ -429,6 +429,48 @@ static int get_asv_group(enum dvfs_id domain, unsigned int lv)
 	return asv;
 }
 
+#define OC_BIG_SAFETY_UV		25000
+#define OC_MID_HEADROOM_UV		12500
+#define OC_LITTLE_SAFETY_UV		12500
+#define POOR_ASV_BIN_MAX		4
+#define KHZ_2300			2300000
+#define KHZ_2600			2600000
+#define KHZ_2704			2704000
+#define KHZ_1716			1716000
+
+static unsigned int exynos8890_get_freq_khz(enum dvfs_id domain, unsigned int lv)
+{
+	switch (domain) {
+	case cal_asv_dvfs_big:
+		return asv_dvfs_big->table->members[lv];
+	case cal_asv_dvfs_little:
+		return asv_dvfs_little->table->members[lv];
+	default:
+		return 0;
+	}
+}
+
+static unsigned int exynos8890_apply_oc_asv_policy(enum dvfs_id domain,
+		unsigned int lv, int asv_grp, unsigned int uv)
+{
+	unsigned int freq = exynos8890_get_freq_khz(domain, lv);
+
+	if (domain == cal_asv_dvfs_big) {
+		if (asv_grp <= POOR_ASV_BIN_MAX && freq >= KHZ_2704) {
+			uv += (OC_BIG_SAFETY_UV + 12500);
+		} else if (asv_grp <= POOR_ASV_BIN_MAX && freq >= KHZ_2600) {
+			uv += OC_BIG_SAFETY_UV;
+		} else if (freq >= KHZ_2300 && freq < KHZ_2600 && uv > OC_MID_HEADROOM_UV) {
+			uv -= OC_MID_HEADROOM_UV;
+		}
+	}
+
+	if (domain == cal_asv_dvfs_little && freq >= KHZ_1716)
+		uv += OC_LITTLE_SAFETY_UV;
+
+	return uv;
+}
+
 static unsigned int get_asv_voltage(enum dvfs_id domain, unsigned int lv)
 {
 	int asv;
@@ -551,6 +593,8 @@ static unsigned int get_asv_voltage(enum dvfs_id domain, unsigned int lv)
 		if (volt < (asv_tbl_info.g3dm_vthr2 * 50000 + 750000))
 			volt = asv_tbl_info.g3dm_vthr2 * 50000 + 750000;
 	}
+
+	volt = exynos8890_apply_oc_asv_policy(domain, lv, asv, volt);
 
 	return volt;
 }
