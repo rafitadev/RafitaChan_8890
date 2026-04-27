@@ -1175,6 +1175,7 @@
 
 		card-detect = <&gpa1 5 0xf>;
 		sec-sd-slot-type = <2>;
+		vmmc-supply = <&sd_fixed_vcc>;
 		slot@0 {
 			reg = <0>;
 			bus-width = <4>;

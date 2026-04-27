@@ -544,6 +544,8 @@ struct sec_bat_adc_region {
 struct sec_charging_current {
 	unsigned int input_current_limit;
 	unsigned int fast_charging_current;
+	unsigned int full_check_current_1st;
+	unsigned int full_check_current_2nd;
 };
 
 #define sec_charging_current_t \

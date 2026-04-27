@@ -244,8 +244,9 @@ BUILD_GENERATE_CONFIG()
     echo "# CONFIG_MODEM_PIE_REV is not set" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
   fi
   if [ $CR_KSU = "y" ]; then
-    echo " Building KernelSU Kernel"
+    echo " Building KernelSU Next Kernel"
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU
+    SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU_EXTRAS
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU_TAMPER_SYSCALL_TABLE
     if [ "$CR_KSU_MANUAL_HOOK" = "y" ]; then
       SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU_MANUAL_HOOK
@@ -261,9 +262,10 @@ BUILD_GENERATE_CONFIG()
       fi
     fi
     CR_IMAGE_NAME=$CR_IMAGE_NAME-ksu
-    zver=$zver-KernelSU
+    zver=$zver-KernelSU-Next
   else
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU
+    SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_EXTRAS
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_MANUAL_HOOK
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_KPROBES_HOOK
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_KPROBES_KSUD
@@ -599,6 +601,7 @@ echo " "
 read -p "Please select your SElinux mode (1-2) > " CR_SELINUX
 echo " "
 read -p "Enable KernelSU? (y/n) > " CR_KSU
+CR_KSU=$(echo "$CR_KSU" | tr '[:upper:]' '[:lower:]')
 echo " "
 if [ "$CR_TARGET" = "6" ]; then
 echo "Build Aborted"
