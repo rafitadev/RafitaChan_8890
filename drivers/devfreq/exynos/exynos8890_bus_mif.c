@@ -56,8 +56,8 @@ static unsigned long origin_suspend_freq = 0;
 static struct pm_qos_request int_pm_qos_from_mif;
 
 static u32 int_min_table[] = {
-	400000,		/* MIF L0  1794MHz, INT L11 */
-	336000,		/* MIF L1  1716MHz, INT L12 */
+	690000,		/* MIF L0  1794MHz, INT boost */
+	650000,		/* MIF L1  1716MHz, INT boost */
 	336000,		/* MIF L2  1539MHz, INT L12 */
 	255000,		/* MIF L3  1352MHz, INT L13 */
 	255000,		/* MIF L4  1144MHz, INT L13 */

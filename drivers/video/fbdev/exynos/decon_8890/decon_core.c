@@ -5646,7 +5646,7 @@ static int decon_probe(struct platform_device *pdev)
 		decon_err("failed to run update_regs thread\n");
 		goto fail_update_thread;
 	}
-	param.sched_priority = 2;
+	param.sched_priority = 4;
 	sched_setscheduler_nocheck(decon->update_regs_thread, SCHED_FIFO, &param);
 	init_kthread_work(&decon->update_regs_work, decon_update_regs_handler);
 

@@ -24,6 +24,8 @@ unsigned int vclk_umux_list_size = num_of_umux;
 unsigned int vclk_dfs_list_size = num_of_dfs;
 
 #define ADD_LIST(to, x)		to[x & 0xFFFF] = &(vclk_##x)
+#define EXYNOS8890_OC_BIG_KHZ	2704000
+#define EXYNOS8890_OC_LIT_KHZ	1716000
 
 
 static struct pwrcal_clk_set pxmxdx_top_grp[] = {
@@ -2317,6 +2319,18 @@ void vclk_init(void)
 	ADD_LIST(vclk_dfs_list, dvfs_cam);
 	ADD_LIST(vclk_dfs_list, dvfs_disp);
 	ADD_LIST(vclk_dfs_list, dvs_g3dm);
+
+	/*
+	 * OC compatibility hints for custom userspace:
+	 * effective OPP data is populated in DFS init from ECT and
+	 * extended by OC injection in S5E8890-dfs.c.
+	 */
+	if (vclk_dfs_list[dvfs_big & 0xFFFF] && vclk_dfs_list[dvfs_big & 0xFFFF]->table &&
+	    vclk_dfs_list[dvfs_big & 0xFFFF]->table->max_freq < EXYNOS8890_OC_BIG_KHZ)
+		vclk_dfs_list[dvfs_big & 0xFFFF]->table->max_freq = EXYNOS8890_OC_BIG_KHZ;
+	if (vclk_dfs_list[dvfs_little & 0xFFFF] && vclk_dfs_list[dvfs_little & 0xFFFF]->table &&
+	    vclk_dfs_list[dvfs_little & 0xFFFF]->table->max_freq < EXYNOS8890_OC_LIT_KHZ)
+		vclk_dfs_list[dvfs_little & 0xFFFF]->table->max_freq = EXYNOS8890_OC_LIT_KHZ;
 
 	/* This code is for reference count sync. Initial state of BUS3_PLL is enabled. */
 	vclk_enable(VCLK(p1_bus3_pll));

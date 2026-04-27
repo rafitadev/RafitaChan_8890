@@ -47,3 +47,6 @@ obj-$(CONFIG_SEC_HOTPLUG)	+= sec_hotplug.o
 
 # Samsung sec NAD Feature
 obj-$(CONFIG_SEC_NAD)		+= sec_nad.o
+
+# Samsung pageboost
+obj-$(CONFIG_SAMSUNG_PAGEBOOST)	+= pageboost.o
