@@ -22,7 +22,15 @@ static bool schedtune_initialized = false;
 
 int sysctl_sched_cfs_boost __read_mostly;
 
-extern struct target_nrg schedtune_target_nrg;
+/*
+ * HMP builds without full EAS plumbing may not provide an out-of-line
+ * schedtune_target_nrg definition. Keep a local fallback so vmlinux link
+ * never depends on missing EAS objects/symbols.
+ */
+static struct target_nrg schedtune_target_nrg __read_mostly = {
+	.min_power = 0,
+	.max_power = 1024,
+};
 
 /* Performance Boost region (B) threshold params */
 static int perf_boost_idx;
