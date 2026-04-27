@@ -8,6 +8,11 @@
 
 #include <trace/events/sched.h>
 
+#ifndef trace_sched_tune_filter
+#define trace_sched_tune_filter(nrg_delta, cap_delta, nrg_gain, cap_gain, payoff, region) \
+	do { } while (0)
+#endif
+
 #include "sched.h"
 #include "tune.h"
 
@@ -829,60 +834,13 @@ schedtune_add_cluster_nrg(
 		struct sched_group *sg,
 		struct target_nrg *ste)
 {
-	struct sched_domain *sd2;
-	struct sched_group *sg2;
-
-	struct cpumask *cluster_cpus;
-	char str[32];
-
-	unsigned long min_pwr;
-	unsigned long max_pwr;
-	int cpu;
-
-	/* Get Cluster energy using EM data for the first CPU */
-	cluster_cpus = sched_group_cpus(sg);
-	snprintf(str, 32, "CLUSTER[%*pbl]",
-		 cpumask_pr_args(cluster_cpus));
-
-	min_pwr = sg->sge->idle_states[sg->sge->nr_idle_states - 1].power;
-	max_pwr = sg->sge->cap_states[sg->sge->nr_cap_states - 1].power;
-	pr_info("schedtune: %-17s min_pwr: %5lu max_pwr: %5lu\n",
-		str, min_pwr, max_pwr);
-
 	/*
-	 * Keep track of this cluster's energy in the computation of the
-	 * overall system energy
+	 * Exynos8890 HMP kernels without complete EAS plumbing don't provide
+	 * sched_group::sge / per_cpu(sd_ea). Keep SchedTune available for
+	 * boost logic and skip EM-based accounting.
 	 */
-	ste->min_power += min_pwr;
-	ste->max_power += max_pwr;
-
-	/* Get CPU energy using EM data for each CPU in the group */
-	for_each_cpu(cpu, cluster_cpus) {
-		/* Get a SD view for the specific CPU */
-		for_each_domain(cpu, sd2) {
-			/* Get the CPU group */
-			sg2 = sd2->groups;
-			min_pwr = sg2->sge->idle_states[sg2->sge->nr_idle_states - 1].power;
-			max_pwr = sg2->sge->cap_states[sg2->sge->nr_cap_states - 1].power;
-
-			ste->min_power += min_pwr;
-			ste->max_power += max_pwr;
-
-			snprintf(str, 32, "CPU[%d]", cpu);
-			pr_info("schedtune: %-17s min_pwr: %5lu max_pwr: %5lu\n",
-				str, min_pwr, max_pwr);
-
-			/*
-			 * Assume we have EM data only at the CPU and
-			 * the upper CLUSTER level
-			 */
-			BUG_ON(!cpumask_equal(
-				sched_group_cpus(sg),
-				sched_group_cpus(sd2->parent->groups)
-				));
-			break;
-		}
-	}
+	if (!sd || !sg || !ste)
+		return;
 }
 
 /*
@@ -896,38 +854,19 @@ static int
 schedtune_init(void)
 {
 	struct target_nrg *ste = &schedtune_target_nrg;
-	unsigned long delta_pwr = 0;
-	struct sched_domain *sd;
-	struct sched_group *sg;
+	unsigned long delta_pwr = 1;
 
 	pr_info("schedtune: init normalization constants...\n");
-	ste->max_power = 0;
+	ste->max_power = 1024;
 	ste->min_power = 0;
-
-	rcu_read_lock();
-
-	/*
-	 * When EAS is in use, we always have a pointer to the highest SD
-	 * which provides EM data.
-	 */
-	sd = rcu_dereference(per_cpu(sd_ea, cpumask_first(cpu_online_mask)));
-	if (!sd) {
-		pr_info("schedtune: no energy model data\n");
-		goto nodata;
-	}
-
-	sg = sd->groups;
-	do {
-		schedtune_add_cluster_nrg(sd, sg, ste);
-	} while (sg = sg->next, sg != sd->groups);
-
-	rcu_read_unlock();
 
 	pr_info("schedtune: %-17s min_pwr: %5lu max_pwr: %5lu\n",
 		"SYSTEM", ste->min_power, ste->max_power);
 
-	/* Compute normalization constants */
+	/* Compute normalization constants using a safe fallback range */
 	delta_pwr = ste->max_power - ste->min_power;
+	if (!delta_pwr)
+		delta_pwr = 1;
 	ste->rdiv = reciprocal_value(delta_pwr);
 	pr_info("schedtune: using normalization constants mul: %u sh1: %u sh2: %u\n",
 		ste->rdiv.m, ste->rdiv.sh1, ste->rdiv.sh2);
@@ -941,10 +880,5 @@ schedtune_init(void)
 #endif
 
 	return 0;
-
-nodata:
-	rcu_read_unlock();
-	return -EINVAL;
 }
 postcore_initcall(schedtune_init);
-
