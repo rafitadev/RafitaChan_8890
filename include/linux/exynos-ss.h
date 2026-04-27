@@ -296,7 +296,7 @@ extern void exynos_ss_get_softlockup_info(unsigned int cpu, void *info);
 #define exynos_ss_get_item_size(a)	do { } while(0)
 #define exynos_ss_get_item_paddr(a)	do { } while(0)
 #define exynos_ss_check_crash_key(a,b)	do { } while(0)
-#define exynos_ss_panic_handler_safe(a) do { } while(0)
+#define exynos_ss_panic_handler_safe(regs) do { } while (0)
 #define exynos_ss_get_last_pc(a)       do { } while(0)
 #define exynos_ss_get_last_pc_paddr()  do { } while(0)
 #define exynos_ss_hook_hardlockup_entry(a) do { } while(0)
