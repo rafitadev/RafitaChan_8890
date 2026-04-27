@@ -1954,7 +1954,7 @@ static ssize_t glove_mode_enable(struct device *dev,
 
 	mode = touchkey_mode_change(tkey_i2c, CMD_GET_LAST_MODE);
 	if (mode == MODE_FLIP && data == 0) {
-		input_info(true, &client->dev, "%s, pass glove off by flip on\n", __func__);
+		input_info(true, &tkey_i2c->client->dev, "%s, pass glove off by flip on\n", __func__);
 		return size;
 	}
 
