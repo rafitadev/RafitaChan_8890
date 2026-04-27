@@ -38,13 +38,13 @@ CR_KERNEL=$CR_DIR/arch/arm64/boot/Image
 # Compiled dtb by dtbtool
 CR_DTB=$CR_DIR/arch/arm64/boot/dtb.img
 # Kernel Name and Version
-CR_VERSION=V1.0
-CR_NAME=HeroGraceKernel
+CR_VERSION=V13.0
+CR_NAME=RafitaChan
 # Thread count
 CR_JOBS=$(nproc --all)
 # Target Android version
-CR_ANDROID=q
-CR_PLATFORM=10
+CR_ANDROID=p
+CR_PLATFORM=9.0.0
 # Target ARCH
 CR_ARCH=arm64
 # Current Date
@@ -78,7 +78,7 @@ CR_KSU="n"
 CR_CLEAN="n"
 # Default to OneUI-Q
 CR_CONFIG_VAR=$CR_CONFIG_ONEUI
-CR_DTB_MOUNT=$CR_DTS_ONEUI
+CR_DTB_MOUNT=$CR_DTS_TREBLE
 CR_RAMDISK=$CR_RAMDISK_Q
 CR_HALLIC="1"
 # Compiler Paths
@@ -552,7 +552,7 @@ echo "1) Selinux Permissive " "2) Selinux Enforcing"
 echo " "
 read -p "Please select your SElinux mode (1-2) > " CR_SELINUX
 echo " "
-read -p "Enable KernelSU? (y/n) > " CR_KSU
+read -p "Enable SukiSU-Ultra? (y/n) > " CR_KSU
 echo " "
 if [ "$CR_TARGET" = "6" ]; then
 echo "Build Aborted"
@@ -587,7 +587,7 @@ fi
 #{
 #if [ $CR_ROOT = 1 ]; then
 #     echo " "
-#     echo " WARNING : KernelSU Enabled!"
+#     echo " WARNING : SukiSU-Ultra Enabled!"
 #     mv $CR_PRODUCT/$CR_IMAGE_NAME.img $CR_PRODUCT/$CR_IMAGE_NAME-KernelSU.img
 #     CR_IMAGE_NAME=$CR_IMAGE_NAME-KernelSU
 #fi
