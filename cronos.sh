@@ -75,6 +75,8 @@ CR_ROOT="0"
 CR_SELINUX="1"
 CR_BOMB="0"
 CR_KSU="n"
+CR_KSU_NEXT="n"
+CR_SUSFS="n"
 CR_KSU_MANUAL_HOOK="y"
 CR_KSU_KPROBES_KSUD="n"
 CR_CLEAN="n"
@@ -113,6 +115,25 @@ SET_KCONFIG()
       "$CR_DIR/scripts/config" --file "$file" -d "$key"
       ;;
   esac
+}
+
+KCONFIG_SYMBOL_EXISTS()
+{
+  local key=$1
+  rg -q "^[[:space:]]*config[[:space:]]+$key([[:space:]]|$)" \
+    "$CR_DIR/init" "$CR_DIR/kernel" "$CR_DIR/fs" "$CR_DIR/drivers" "$CR_DIR/security" "$CR_DIR/net" "$CR_DIR/mm" 2>/dev/null
+}
+
+SET_KCONFIG_IF_EXISTS()
+{
+  local file=$1
+  local mode=$2
+  local key=$3
+  if KCONFIG_SYMBOL_EXISTS "$key"; then
+    SET_KCONFIG "$file" "$mode" "$key"
+    return 0
+  fi
+  return 1
 }
 
 # Compiler Selection
@@ -244,8 +265,35 @@ BUILD_GENERATE_CONFIG()
     echo "# CONFIG_MODEM_PIE_REV is not set" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
   fi
   if [ $CR_KSU = "y" ]; then
-    echo " Building KernelSU Kernel"
+    if [ "$CR_KSU_NEXT" = "y" ]; then
+      echo " Building KernelSU Next Kernel"
+    else
+      echo " Building KernelSU Kernel"
+    fi
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU
+    if [ "$CR_KSU_NEXT" = "y" ]; then
+      SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU_EXTRAS
+    else
+      SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_EXTRAS
+    fi
+    if [ "$CR_SUSFS" = "y" ]; then
+      if [ "$CR_KSU_NEXT" != "y" ]; then
+        echo " ERROR: SUSFS requires KernelSU Next path. Abort."
+        exit 1
+      fi
+      if ! SET_KCONFIG_IF_EXISTS "$KSU_DEFCONFIG_FILE" enable SUSFS; then
+        echo " ERROR: SUSFS selected but no SUSFS Kconfig symbol found in tree. Abort."
+        exit 1
+      fi
+      SET_KCONFIG_IF_EXISTS "$KSU_DEFCONFIG_FILE" enable KSU_SUSFS
+      SET_KCONFIG_IF_EXISTS "$KSU_DEFCONFIG_FILE" enable KSU_SUSFS_SUS_PATH
+      zver=$zver-SUSFS
+      CR_IMAGE_NAME=$CR_IMAGE_NAME-susfs
+    else
+      SET_KCONFIG_IF_EXISTS "$KSU_DEFCONFIG_FILE" disable SUSFS
+      SET_KCONFIG_IF_EXISTS "$KSU_DEFCONFIG_FILE" disable KSU_SUSFS
+      SET_KCONFIG_IF_EXISTS "$KSU_DEFCONFIG_FILE" disable KSU_SUSFS_SUS_PATH
+    fi
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU_TAMPER_SYSCALL_TABLE
     if [ "$CR_KSU_MANUAL_HOOK" = "y" ]; then
       SET_KCONFIG "$KSU_DEFCONFIG_FILE" enable KSU_MANUAL_HOOK
@@ -261,9 +309,14 @@ BUILD_GENERATE_CONFIG()
       fi
     fi
     CR_IMAGE_NAME=$CR_IMAGE_NAME-ksu
-    zver=$zver-KernelSU
+    if [ "$CR_KSU_NEXT" = "y" ]; then
+      zver=$zver-KernelSU-Next
+    else
+      zver=$zver-KernelSU
+    fi
   else
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU
+    SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_EXTRAS
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_MANUAL_HOOK
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_KPROBES_HOOK
     SET_KCONFIG "$KSU_DEFCONFIG_FILE" disable KSU_KPROBES_KSUD
@@ -474,6 +527,8 @@ CR_TARGET=2
 CR_COMPILER=2
 CR_SELINUX=1
 CR_KSU="y"
+CR_KSU_NEXT="y"
+CR_SUSFS="n"
 CR_CLEAN="n"
 echo " DEBUG : Set Build options "
 echo " DEBUG : Variant  : $CR_VARIANT_G935"
@@ -599,6 +654,20 @@ echo " "
 read -p "Please select your SElinux mode (1-2) > " CR_SELINUX
 echo " "
 read -p "Enable KernelSU? (y/n) > " CR_KSU
+CR_KSU=$(echo "$CR_KSU" | tr '[:upper:]' '[:lower:]')
+if [ "$CR_KSU" = "y" ]; then
+read -p "Enable KernelSU Next? (y/n) > " CR_KSU_NEXT
+CR_KSU_NEXT=$(echo "$CR_KSU_NEXT" | tr '[:upper:]' '[:lower:]')
+if [ "$CR_KSU_NEXT" = "y" ]; then
+read -p "Enable SUSFS? (y/n) > " CR_SUSFS
+CR_SUSFS=$(echo "$CR_SUSFS" | tr '[:upper:]' '[:lower:]')
+else
+CR_SUSFS="n"
+fi
+else
+CR_KSU_NEXT="n"
+CR_SUSFS="n"
+fi
 echo " "
 if [ "$CR_TARGET" = "6" ]; then
 echo "Build Aborted"
