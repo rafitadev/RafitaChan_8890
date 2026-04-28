@@ -666,6 +666,27 @@ void DISP_SS_EVENT_LOG_CMD(struct v4l2_subdev *sd, u32 cmd_id, unsigned long dat
 void DISP_SS_EVENT_SHOW(struct seq_file *s, struct decon_device *decon);
 void DISP_SS_EVENT_SIZE_ERR_LOG(struct v4l2_subdev *sd, struct disp_ss_size_info *info);
 #else /*!*/
+typedef enum disp_esd_irq {
+	irq_no_esd = 0,
+	irq_pcd_det,
+	irq_err_fg,
+	irq_disp_det
+} disp_esd_irq_t;
+
+struct esd_protect {
+	u32 pcd_irq;
+	u32 err_irq;
+	u32 disp_det_irq;
+	u32 pcd_gpio;
+	u32 disp_det_gpio;
+	struct workqueue_struct *esd_wq;
+	struct work_struct esd_work;
+	u32	queuework_pending;
+	int irq_disable;
+	disp_esd_irq_t irq_type;
+	ktime_t when_irq_enable;
+};
+
 #define DISP_SS_EVENT_START(...) do { } while(0)
 #define DISP_SS_EVENT_LOG(...) do { } while(0)
 #define DISP_SS_EVENT_LOG_WINCON(...) do { } while(0)
