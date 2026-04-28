@@ -3483,7 +3483,9 @@ MAKE_QUIRK_ACCESSORS(mmu);
 MAKE_QUIRK_ACCESSORS(jm);
 
 #ifndef MALI_SEC_INTEGRATION
+#if KBASE_TRACE_ENABLE
 extern const struct file_operations kbasep_trace_debugfs_fops;
+#endif
 #endif /* MALI_SEC_INTEGRATION */
 
 /**
@@ -3560,9 +3562,11 @@ static int kbase_device_debugfs_init(struct kbase_device *kbdev)
 	kbdev->debugfs_ctx_directory = debugfs_create_dir("ctx",
 			kbdev->mali_debugfs_directory);
 #else
+#if KBASE_TRACE_ENABLE
 	kbdev->trace_dentry = debugfs_create_file("mali_trace", S_IRUGO,
 			kbdev->mali_debugfs_directory, kbdev,
 			&kbasep_trace_debugfs_fops);
+#endif
 
 	kbdev->debugfs_ctx_directory = debugfs_create_dir("mem",
 			kbdev->mali_debugfs_directory);

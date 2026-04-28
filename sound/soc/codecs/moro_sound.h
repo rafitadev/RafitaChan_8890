@@ -51,7 +51,7 @@ int get_speaker_gain(void);
 // speaker levels
 #define SPEAKER_DEFAULT			30
 #define SPEAKER_MIN 			0
-#define SPEAKER_MAX 			63
+#define SPEAKER_MAX 			66
 
 // Mixers sources
 #define OUT1L_MIX_DEFAULT		32

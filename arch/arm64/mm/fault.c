@@ -45,7 +45,6 @@
 
 static int safe_fault_in_progress = 0;
 static const char *fault_name(unsigned int esr);
-extern void exynos_ss_panic_handler_safe(struct pt_regs *regs);
 
 /*
  * Dump out the page tables associated with 'addr' in mm 'mm'.

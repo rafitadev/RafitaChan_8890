@@ -5646,7 +5646,7 @@ static int decon_probe(struct platform_device *pdev)
 		decon_err("failed to run update_regs thread\n");
 		goto fail_update_thread;
 	}
-	param.sched_priority = 2;
+	param.sched_priority = 4;
 	sched_setscheduler_nocheck(decon->update_regs_thread, SCHED_FIFO, &param);
 	init_kthread_work(&decon->update_regs_work, decon_update_regs_handler);
 
@@ -5768,9 +5768,11 @@ static int decon_probe(struct platform_device *pdev)
 			decon_err("%s: wait_for_update_timeout\n", __func__);
 
 decon_init_done:
-		decon->ignore_vsync = false;
-		decon->disp_ss_log_level = DISP_EVENT_LEVEL_HIGH;
-		if ((decon->id == 0)  && (decon->pdata->psr_mode == DECON_MIPI_COMMAND_MODE)) {
+			decon->ignore_vsync = false;
+#ifdef CONFIG_DECON_EVENT_LOG
+			decon->disp_ss_log_level = DISP_EVENT_LEVEL_HIGH;
+#endif
+			if ((decon->id == 0)  && (decon->pdata->psr_mode == DECON_MIPI_COMMAND_MODE)) {
 			if (dsim == NULL) {
 				sd = decon->mdev->vpp_sd[decon->default_idma];
 				dsim = container_of(decon->output_sd, struct dsim_device, sd);
