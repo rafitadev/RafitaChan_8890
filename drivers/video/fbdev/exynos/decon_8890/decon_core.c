@@ -5768,9 +5768,11 @@ static int decon_probe(struct platform_device *pdev)
 			decon_err("%s: wait_for_update_timeout\n", __func__);
 
 decon_init_done:
-		decon->ignore_vsync = false;
-		decon->disp_ss_log_level = DISP_EVENT_LEVEL_HIGH;
-		if ((decon->id == 0)  && (decon->pdata->psr_mode == DECON_MIPI_COMMAND_MODE)) {
+			decon->ignore_vsync = false;
+#ifdef CONFIG_DECON_EVENT_LOG
+			decon->disp_ss_log_level = DISP_EVENT_LEVEL_HIGH;
+#endif
+			if ((decon->id == 0)  && (decon->pdata->psr_mode == DECON_MIPI_COMMAND_MODE)) {
 			if (dsim == NULL) {
 				sd = decon->mdev->vpp_sd[decon->default_idma];
 				dsim = container_of(decon->output_sd, struct dsim_device, sd);

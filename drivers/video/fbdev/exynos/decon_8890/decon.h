@@ -690,6 +690,7 @@ struct esd_protect {
 #define DISP_SS_EVENT_START(...) do { } while(0)
 #define DISP_SS_EVENT_LOG(...) do { } while(0)
 #define DISP_SS_EVENT_LOG_WINCON(...) do { } while(0)
+#define DISP_SS_EVENT_LOG_WINCON2(...) do { } while(0)
 #define DISP_SS_EVENT_LOG_CMD(...) do { } while(0)
 #define DISP_SS_EVENT_SHOW(...) do { } while(0)
 #define DISP_SS_EVENT_SIZE_ERR_LOG(...) do { } while(0)
