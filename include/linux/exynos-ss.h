@@ -22,6 +22,7 @@
 #include "exynos-ss-soc.h"
 
 extern unsigned int *exynos_ss_base_enabled;
+extern int ess_boot_logging;
 
 /* mandatory */
 extern void __exynos_ss_task(int cpu, void *v_task);
@@ -303,6 +304,7 @@ extern void exynos_ss_get_softlockup_info(unsigned int cpu, void *info);
 #define exynos_ss_hook_hardlockup_exit() do { } while(0)
 #define exynos_ss_get_hardlockup_info(a, b)	do { } while (0)
 #define exynos_ss_get_softlockup_info(a, b)	do { } while (0)
+#define ess_boot_logging			(0)
 #endif /* CONFIG_EXYNOS_SNAPSHOT */
 
 static inline void exynos_ss_bug(void) {BUG();}

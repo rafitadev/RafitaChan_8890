@@ -197,7 +197,9 @@ alternative_else_nop_endif
 	stp	x2, x3, [sp, #16]
 	stp	x30, tsk, [sp, #32]
 	mov	x0, #0
+#ifdef CONFIG_EXYNOS_SNAPSHOT
 	bl	exynos_ss_panic_handler_safe
+#endif
 	b	.
 	/* Save the task's original addr_limit and set USER_DS (TASK_SIZE_64) */
 0:	ldr	x20, [tsk, #TI_ADDR_LIMIT]
