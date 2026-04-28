@@ -237,7 +237,6 @@ static void cpu_hotplug_work(struct work_struct *work)
 static void force_panic_work(struct work_struct *work)
 {
 	pr_err("force panic by force_panic_work\n");
-	ess_boot_logging = 0;
 }
 
 static int control_cpu_hotplug(bool enable)
