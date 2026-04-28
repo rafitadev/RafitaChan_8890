@@ -217,11 +217,11 @@
 		battery,recharging_total_time = <5400>;
 		battery,charging_reset_time = <0>;
 
-		battery,chg_float_voltage = <43500>;
+		battery,chg_float_voltage = <43400>;
 		battery,chg_float_voltage_conv = <10>;
 
-		battery,swelling_high_temp_block = <410>;
-		battery,swelling_high_temp_recov = <390>;
+		battery,swelling_high_temp_block = <400>;
+		battery,swelling_high_temp_recov = <380>;
 		battery,swelling_low_temp_block_1st = <150>;
 		battery,swelling_low_temp_recov_1st = <200>;
 		battery,swelling_low_temp_block_2nd = <50>;
@@ -234,7 +234,7 @@
 		battery,swelling_wc_high_temp_current = <760>;	/* 0.3C */
 		battery,swelling_wc_low_temp_current = <760>;	/* 0.3C */
 
-		battery,swelling_drop_float_voltage = <41500>;
+		battery,swelling_drop_float_voltage = <41200>;
 		battery,swelling_high_rechg_voltage = <4000>;
 		battery,swelling_low_rechg_voltage = <4000>;
 
@@ -251,6 +251,12 @@
 		battery,siop_wireless_charging_limit_current = <700>;
 		battery,siop_hv_wireless_input_limit_current = <600>;
 		battery,siop_hv_wireless_charging_limit_current = <700>;
+
+		/* Store mode profile (kernel manager controllable via store_mode sysfs) */
+		battery,factory_store_mode_max = <80>;
+		battery,factory_store_mode_min = <70>;
+		battery,store_mode_afc_input_current = <380>;
+		battery,store_mode_hv_wireless_input_current = <350>;
 
 		battery,ttf_hv_charge_current = <2150>;
 		battery,ttf_hv_wireless_charge_current = <1000>;

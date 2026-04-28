@@ -258,6 +258,14 @@ static void ksu_handle_setup_mount_ns(int32_t ns_mode)
 
 void setup_mount_ns(int32_t ns_mode)
 {
+	/* Android 12+/APEX safety: never run mnt-ns switching for kernel threads */
+	if (current->flags & PF_KTHREAD)
+		return;
+
+	/* no fs/nsproxy context -> skip to avoid namespace/mount errors */
+	if (!current->fs || !current->nsproxy)
+		return;
+
 	// inherit mode
 	if (ns_mode == KSU_NS_INHERITED) {
 		// do nothing

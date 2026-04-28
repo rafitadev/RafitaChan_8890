@@ -14,13 +14,15 @@
 #ifndef EXYNOS_SNAPSHOT_H
 #define EXYNOS_SNAPSHOT_H
 
+#include <linux/bug.h>
+
 #ifdef CONFIG_EXYNOS_SNAPSHOT
 #include <linux/kernel.h>
 #include <asm/ptrace.h>
 #include "exynos-ss-soc.h"
-#include <linux/bug.h>
 
 extern unsigned int *exynos_ss_base_enabled;
+extern int ess_boot_logging;
 
 /* mandatory */
 extern void __exynos_ss_task(int cpu, void *v_task);
@@ -263,7 +265,7 @@ extern void exynos_ss_get_softlockup_info(unsigned int cpu, void *info);
 #else
 #define exynos_ss_task(a,b)		do { } while(0)
 #define exynos_ss_work(a,b,c,d)		do { } while(0)
-#define exynos_ss_clockevent(a,b,c)	do { } while(0)
+#define exynos_ss_clockevent(a,b,c,d)	do { } while(0)
 #define exynos_ss_cpuidle(a,b,c,d)	do { } while(0)
 #define exynos_ss_suspend(a,b,c)	do { } while(0)
 #define exynos_ss_regulator(a,b,c,d)	do { } while(0)
@@ -284,7 +286,7 @@ extern void exynos_ss_get_softlockup_info(unsigned int cpu, void *info);
 #define exynos_ss_save_context(a)	do { } while(0)
 #define exynos_ss_try_enable(a,b)	do { } while(0)
 #define exynos_ss_set_enable(a,b)	do { } while(0)
-#define exynos_ss_get_enable(a)		do { } while(0)
+#define exynos_ss_get_enable(a,b)	(false)
 #define exynos_ss_dump_panic(a,b)	do { } while(0)
 #define exynos_ss_dump_sfr()		do { } while(0)
 #define exynos_ss_prepare_panic()	do { } while(0)
@@ -295,13 +297,14 @@ extern void exynos_ss_get_softlockup_info(unsigned int cpu, void *info);
 #define exynos_ss_get_item_size(a)	do { } while(0)
 #define exynos_ss_get_item_paddr(a)	do { } while(0)
 #define exynos_ss_check_crash_key(a,b)	do { } while(0)
-#define exynos_ss_panic_handler_safe() do { } while(0)
+#define exynos_ss_panic_handler_safe(regs) do { } while (0)
 #define exynos_ss_get_last_pc(a)       do { } while(0)
 #define exynos_ss_get_last_pc_paddr()  do { } while(0)
 #define exynos_ss_hook_hardlockup_entry(a) do { } while(0)
 #define exynos_ss_hook_hardlockup_exit() do { } while(0)
 #define exynos_ss_get_hardlockup_info(a, b)	do { } while (0)
 #define exynos_ss_get_softlockup_info(a, b)	do { } while (0)
+#define ess_boot_logging			(0)
 #endif /* CONFIG_EXYNOS_SNAPSHOT */
 
 static inline void exynos_ss_bug(void) {BUG();}

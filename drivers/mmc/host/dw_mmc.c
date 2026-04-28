@@ -1451,8 +1451,6 @@ static void mci_send_cmd(struct dw_mci_slot *slot, u32 cmd, u32 arg)
 		"Timeout sending command (cmd %#x arg %#x status %#x)\n",
 		cmd, arg, cmd_status);
 
-	/* Debuggin for interrupt storming */
-	dw_mci_debug_flag = 1;
 	dw_mci_reg_dump(host);
 }
 
@@ -2893,9 +2891,6 @@ static irqreturn_t dw_mci_interrupt(int irq, void *dev_id)
 
 	status = mci_readl(host, RINTSTS);
 	pending = mci_readl(host, MINTSTS); /* read-only mask reg */
-
-	if (dw_mci_debug_flag == 1)
-		dev_err(host->dev, "## RINTSTS 0x %08x\n", pending);
 
 	/*
 	 * DTO fix - version 2.10a and below, and only if internal DMA

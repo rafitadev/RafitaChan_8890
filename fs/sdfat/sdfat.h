@@ -395,8 +395,13 @@ void sdfat_debug_check_clusters(struct inode *inode);
 
 #define sdfat_debug_check_clusters(inode)
 #define sdfat_debug_bug_on(expr)
+#define sdfat_debug_warn_on(expr)
 
 #endif /* CONFIG_SDFAT_DEBUG */
+
+#ifndef sdfat_debug_warn_on
+#define sdfat_debug_warn_on(cond) do { } while (0)
+#endif
 
 #ifdef CONFIG_SDFAT_TRACE_ELAPSED_TIME
 u32 sdfat_time_current_usec(struct timeval *tv);
@@ -506,4 +511,3 @@ extern void __sdfat_dmsg(int level, const char *fmt, ...) __printf(2, 3) __cold;
 }
 
 #endif /* !_SDFAT_H */
-

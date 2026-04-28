@@ -186,11 +186,11 @@
 		battery,chg_gpio_full_check = <0>;
 		battery,chg_polarity_full_check = <1>;
 
-		battery,chg_high_temp_1st = <515>;
-		battery,chg_high_temp_2nd = <515>;
-		battery,chg_high_temp_recovery = <500>;
-		battery,chg_charging_limit_current = <1033>;
-		battery,chg_charging_limit_current_2nd = <1033>;
+		battery,chg_high_temp_1st = <480>;
+		battery,chg_high_temp_2nd = <490>;
+		battery,chg_high_temp_recovery = <460>;
+		battery,chg_charging_limit_current = <980>;
+		battery,chg_charging_limit_current_2nd = <930>;
 
 		/* hero1 eur, kor */
 		battery,wpc_high_temp = <430>;
@@ -229,10 +229,10 @@
 		battery,recharging_total_time = <5400>;
 		battery,charging_reset_time = <0>;
 
-		battery,chg_float_voltage = <43500>;
+		battery,chg_float_voltage = <43400>;
 
-		battery,swelling_high_temp_block = <410>;
-		battery,swelling_high_temp_recov = <390>;
+		battery,swelling_high_temp_block = <400>;
+		battery,swelling_high_temp_recov = <380>;
 		battery,swelling_low_temp_block_1st = <150>;
 		battery,swelling_low_temp_recov_1st = <200>;
 		battery,swelling_low_temp_block_2nd = <100>;
@@ -245,7 +245,7 @@
 		battery,swelling_wc_low_temp_current = <900>;	/* 0.3C */
 		battery,swelling_wc_high_temp_current = <900>;	/* 0.3C */
 
-		battery,swelling_drop_float_voltage = <41500>;
+		battery,swelling_drop_float_voltage = <41200>;
 		battery,swelling_high_rechg_voltage = <4000>;
 		battery,swelling_low_rechg_voltage = <4000>;
 
@@ -262,6 +262,12 @@
 		battery,siop_wireless_charging_limit_current = <1000>;
 		battery,siop_hv_wireless_input_limit_current = <600>;
 		battery,siop_hv_wireless_charging_limit_current = <1000>;
+
+		/* Store mode profile (kernel manager controllable via store_mode sysfs) */
+		battery,factory_store_mode_max = <80>;
+		battery,factory_store_mode_min = <70>;
+		battery,store_mode_afc_input_current = <380>;
+		battery,store_mode_hv_wireless_input_current = <350>;
 
 		battery,ttf_hv_charge_current = <2500>;
 		battery,ttf_hv_wireless_charge_current = <1300>;

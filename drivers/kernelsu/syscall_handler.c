@@ -9,6 +9,12 @@
 #include <asm/syscall.h>
 
 #include <trace/events/syscalls.h>
+
+#ifdef CONFIG_KSU_DEBUG
+#define KSU_HOOK_LOG	pr_info
+#else
+#define KSU_HOOK_LOG	pr_debug
+#endif
 // Tracepoint registration count management
 // == 1: just us
 // >  1: someone else is also using syscall tracepoint e.g. ftrace
@@ -42,13 +48,13 @@ static void handle_process_mark(bool mark)
 void ksu_mark_all_process(void)
 {
 	handle_process_mark(true);
-	pr_info("hook_manager: mark all user process done!\n");
+	KSU_HOOK_LOG("hook_manager: mark all user process done!\n");
 }
 
 void ksu_unmark_all_process(void)
 {
 	handle_process_mark(false);
-	pr_info("hook_manager: unmark all user process done!\n");
+	KSU_HOOK_LOG("hook_manager: unmark all user process done!\n");
 }
 
 static void ksu_mark_running_process_locked(void)
