@@ -752,14 +752,16 @@ static int exynos_tmu_cpus_notifier(struct notifier_block *nb,
 		if ((quad_data == NULL) || (dual_data == NULL))
 			return NOTIFY_OK;
 
-		if (big_cpu_cnt == DUAL_CPU) {
-			/* changed to dual */
-			mutex_lock(&boost_lock);
-			dual_data->cpu_num = quad_data->cpu_num = big_cpu_cnt;
+			if (big_cpu_cnt == DUAL_CPU) {
+				/* changed to dual */
+				mutex_lock(&boost_lock);
+#ifdef CONFIG_EXYNOS_SNAPSHOT_THERMAL
+				dual_data->cpu_num = quad_data->cpu_num = big_cpu_cnt;
+#endif
 
-			/* Snap shot logging */
-			exynos_ss_thermal(quad_pdata, 0, cool_device_name, 0);
-			exynos_ss_thermal(dual_pdata, 0, cool_device_name, 1);
+				/* Snap shot logging */
+				exynos_ss_thermal(quad_pdata, 0, cool_device_name, 0);
+				exynos_ss_thermal(dual_pdata, 0, cool_device_name, 1);
 
 			change_core_boost_thermal(quad_data->reg_conf, dual_data->reg_conf, DUAL_MODE);
 			mutex_unlock(&boost_lock);
@@ -783,24 +785,28 @@ static int exynos_tmu_cpus_notifier(struct notifier_block *nb,
 		if ((quad_data == NULL) || (dual_data == NULL))
 			return NOTIFY_OK;
 
-		if (big_cpu_cnt == QUAD_CPU){
-			/* changed to quad */
-			mutex_lock(&boost_lock);
-			dual_data->cpu_num = quad_data->cpu_num = big_cpu_cnt;
+			if (big_cpu_cnt == QUAD_CPU){
+				/* changed to quad */
+				mutex_lock(&boost_lock);
+#ifdef CONFIG_EXYNOS_SNAPSHOT_THERMAL
+				dual_data->cpu_num = quad_data->cpu_num = big_cpu_cnt;
+#endif
 
-			/* Snap shot logging */
-			exynos_ss_thermal(quad_pdata, 0, cool_device_name, 1);
-			exynos_ss_thermal(dual_pdata, 0, cool_device_name, 0);
+				/* Snap shot logging */
+				exynos_ss_thermal(quad_pdata, 0, cool_device_name, 1);
+				exynos_ss_thermal(dual_pdata, 0, cool_device_name, 0);
 
 			change_core_boost_thermal(quad_data->reg_conf, dual_data->reg_conf, QUAD_MODE);
 			mutex_unlock(&boost_lock);
-		} else if (big_cpu_cnt == DUAL_CPU) {
-			mutex_lock(&boost_lock);
-			dual_data->cpu_num = quad_data->cpu_num = big_cpu_cnt;
+			} else if (big_cpu_cnt == DUAL_CPU) {
+				mutex_lock(&boost_lock);
+#ifdef CONFIG_EXYNOS_SNAPSHOT_THERMAL
+				dual_data->cpu_num = quad_data->cpu_num = big_cpu_cnt;
+#endif
 
-			/* Snap shot logging */
-			exynos_ss_thermal(quad_pdata, 0, cool_device_name, 0);
-			exynos_ss_thermal(dual_pdata, 0, cool_device_name, 1);
+				/* Snap shot logging */
+				exynos_ss_thermal(quad_pdata, 0, cool_device_name, 0);
+				exynos_ss_thermal(dual_pdata, 0, cool_device_name, 1);
 
 			change_core_boost_thermal(quad_data->reg_conf, dual_data->reg_conf, DUAL_MODE);
 			mutex_unlock(&boost_lock);
