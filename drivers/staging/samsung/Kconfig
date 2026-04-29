@@ -198,3 +198,23 @@ config BOOTING_VALIDATION
 	bool "Enable checking validation of booting"
 	depends on SEC_DEBUG
 	default n
+
+config SAMSUNG_PAGEBOOST
+	bool "Samsung pageboost prefetch engine"
+	default n
+	help
+	  Backported pageboost prefetch/record engine for Exynos platforms.
+
+config PAGEBOOST_IO_BOOST
+	bool "Pageboost IO priority boosting"
+	depends on SAMSUNG_PAGEBOOST
+	default y
+	help
+	  Raise ioprio for the process being boosted while prefetching.
+
+config PAGEBOOST_DEBUG
+	bool "Pageboost debug logs"
+	depends on SAMSUNG_PAGEBOOST
+	default n
+	help
+	  Enable debug prints for pageboost.

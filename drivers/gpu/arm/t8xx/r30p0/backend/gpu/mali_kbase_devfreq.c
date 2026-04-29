@@ -478,10 +478,20 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	kbdev->devfreq = devfreq_add_device(kbdev->dev, dp,
 				"simple_ondemand", NULL);
 	if (IS_ERR(kbdev->devfreq)) {
+		dev_warn(kbdev->dev,
+			"simple_ondemand unavailable (%ld), trying mali_ondemand\n",
+			PTR_ERR(kbdev->devfreq));
+		kbdev->devfreq = devfreq_add_device(kbdev->dev, dp,
+					"mali_ondemand", NULL);
+	}
+	if (IS_ERR(kbdev->devfreq)) {
 		kfree(dp->freq_table);
 		err = PTR_ERR(kbdev->devfreq);
 		goto add_device_failed;
 	}
+
+	dev_info(kbdev->dev, "Mali devfreq registered: governor=%s, opps=%u\n",
+		kbdev->devfreq->governor_name, dp->max_state);
 
 	/* devfreq_add_device only copies a few of kbdev->dev's fields, so
 	 * set drvdata explicitly so IPA models can access kbdev. */

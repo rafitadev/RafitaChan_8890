@@ -16,7 +16,7 @@
 
 #define BOEFFLA_WL_BLOCKER_VERSION	"1.1.0"
 
-#define LIST_WL_DEFAULT				"mmc0_detect;13960000.decon_f"
+#define LIST_WL_DEFAULT				"mmc0_detect;13960000.decon_f;wlan_wow_wl;netlink;NETLINK"
 
 #define LENGTH_LIST_WL				2048
 #define LENGTH_LIST_WL_DEFAULT		255

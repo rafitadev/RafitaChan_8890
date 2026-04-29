@@ -5022,7 +5022,7 @@ static struct sched_entity *hmp_get_lightest_task(struct sched_entity* se, int m
  * hmp_next_up_threshold: Delay before next up migration (1024 ~= 1 ms)
  * hmp_next_down_threshold: Delay before next down migration (1024 ~= 1 ms)
  */
-static int hmp_boostpulse_duration = 1000000; /* microseconds */
+static int hmp_boostpulse_duration = 90000; /* microseconds */
 static u64 hmp_boostpulse_endtime;
 static int hmp_boost_val;
 static int hmp_family_boost_val;
@@ -5042,8 +5042,8 @@ static DEFINE_RAW_SPINLOCK(hmp_family_boost_lock);
 #ifdef CONFIG_SCHED_HMP_PRIO_FILTER
 unsigned int hmp_up_prio = NICE_TO_PRIO(CONFIG_SCHED_HMP_PRIO_FILTER_VAL);
 #endif
-unsigned int hmp_next_up_threshold = 4096;
-unsigned int hmp_next_down_threshold = 4096;
+unsigned int hmp_next_up_threshold = 3072;
+unsigned int hmp_next_down_threshold = 5632;
 
 static inline int hmp_boost(void)
 {

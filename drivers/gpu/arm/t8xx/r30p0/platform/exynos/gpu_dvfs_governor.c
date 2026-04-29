@@ -32,6 +32,7 @@
 #include "mali_kbase_platform.h"
 #include "gpu_dvfs_handler.h"
 #include "gpu_dvfs_governor.h"
+#include <linux/moduleparam.h>
 #ifdef CONFIG_CPU_THERMAL_IPA
 #include "gpu_ipa.h"
 #endif /* CONFIG_CPU_THERMAL_IPA */
@@ -39,6 +40,8 @@
 #ifdef CONFIG_MALI_DVFS
 typedef void (*GET_NEXT_LEVEL)(struct exynos_context *platform, int utilization);
 GET_NEXT_LEVEL gpu_dvfs_get_next_level;
+static bool gpu_benchmark_mode;
+module_param(gpu_benchmark_mode, bool, 0644);
 
 static int gpu_dvfs_governor_default(struct exynos_context *platform, int utilization);
 static int gpu_dvfs_governor_interactive(struct exynos_context *platform, int utilization);
@@ -251,6 +254,14 @@ int gpu_dvfs_decide_next_freq(struct kbase_device *kbdev, int utilization)
 	unsigned long flags;
 	struct exynos_context *platform = (struct exynos_context *) kbdev->platform_context;
 	DVFS_ASSERT(platform);
+
+	if (gpu_benchmark_mode) {
+		platform->step = gpu_dvfs_get_level(platform->gpu_max_clock_limit);
+#ifdef CONFIG_CPU_THERMAL_IPA
+		ipa_mali_dvfs_requested(platform->table[platform->step].clock);
+#endif
+		return platform->table[platform->step].clock;
+	}
 
 	spin_lock_irqsave(&platform->gpu_dvfs_spinlock, flags);
 	gpu_dvfs_decide_next_governor(platform);

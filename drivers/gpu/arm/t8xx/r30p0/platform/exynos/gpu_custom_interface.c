@@ -2124,12 +2124,21 @@ static ssize_t set_kernel_sysfs_min_lock_dvfs(struct kobject *kobj, struct kobj_
 static ssize_t show_kernel_sysfs_utilization(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
 	ssize_t ret = 0;
+	u32 busy, idle, util;
 	struct exynos_context *platform = (struct exynos_context *)pkbdev->platform_context;
 
 	if (!platform)
 		return -ENODEV;
 
-	ret += snprintf(buf+ret, PAGE_SIZE-ret, "%3d%%", platform->env_data.utilization);
+	util = platform->env_data.utilization;
+	if (!util) {
+		busy = pkbdev->pm.backend.metrics.values.time_busy;
+		idle = pkbdev->pm.backend.metrics.values.time_idle;
+		if (busy || idle)
+			util = (100 * busy) / max((busy + idle), 1u);
+	}
+
+	ret += snprintf(buf+ret, PAGE_SIZE-ret, "%u", util);
 
 	if (ret < PAGE_SIZE - 1) {
 		ret += snprintf(buf+ret, PAGE_SIZE-ret, "\n");
@@ -2393,7 +2402,7 @@ static struct kobj_attribute gpu_available_governor_attribute =
 #endif
 
 static struct kobj_attribute gpu_busy_attribute =
-	__ATTR(gpu_busy, S_IRUGO, show_kernel_sysfs_utilization, NULL);
+	__ATTR(gpu_busy, 0666, show_kernel_sysfs_utilization, NULL);
 
 static struct kobj_attribute gpu_clock_attribute =
 	__ATTR(gpu_clock, S_IRUGO, show_kernel_sysfs_clock, NULL);
