@@ -179,6 +179,7 @@ static unsigned int fingerprint_boost_duration = 160000;
 static unsigned int surfaceflinger_boost_duration = 120000;
 static unsigned int biometric_prewarm_duration = 50000;
 static unsigned int launch_boost_duration = 5000000;
+static unsigned int benchmark_mode_duration = 30000000;
 static bool fingerprint_boost_4core_max = true;
 
 module_param(input_boost_duration, uint, 0644);
@@ -188,6 +189,7 @@ module_param(fingerprint_boost_duration, uint, 0644);
 module_param(surfaceflinger_boost_duration, uint, 0644);
 module_param(biometric_prewarm_duration, uint, 0644);
 module_param(launch_boost_duration, uint, 0644);
+module_param(benchmark_mode_duration, uint, 0644);
 module_param(fingerprint_boost_4core_max, bool, 0644);
 
 #if defined(CONFIG_EXYNOS_DUAL_GOV_PARAMS_SUPPORT)
@@ -970,6 +972,65 @@ static int set_launch_boostpulse(const char *val,
 	return 0;
 }
 
+static int set_benchmark_mode(const char *val,
+		const struct kernel_param *kp)
+{
+	struct cpufreq_policy *policy;
+	struct cpumask done_mask;
+	unsigned int trigger;
+	int ret, cpu;
+
+	ret = kstrtouint(val, 0, &trigger);
+	if (ret)
+		return ret;
+	if (!trigger)
+		return 0;
+
+	cpumask_clear(&done_mask);
+	mutex_lock(&gov_lock);
+
+	for_each_online_cpu(cpu) {
+		struct cpufreq_interactive_tunables *tunables;
+		unsigned long flags;
+
+		if (cpumask_test_cpu(cpu, &done_mask))
+			continue;
+
+		policy = cpufreq_cpu_get(cpu);
+		if (!policy)
+			continue;
+
+		cpumask_or(&done_mask, &done_mask, policy->related_cpus);
+		tunables = policy->governor_data;
+		if (!tunables) {
+			cpufreq_cpu_put(policy);
+			continue;
+		}
+
+		if (!cpumask_test_cpu(4, policy->related_cpus)) {
+			cpufreq_cpu_put(policy);
+			continue;
+		}
+
+		tunables->hispeed_freq = policy->max;
+		tunables->boostpulse_endtime = ktime_to_us(ktime_get()) +
+			benchmark_mode_duration;
+
+		spin_lock_irqsave(&speedchange_cpumask_lock, flags);
+		cpumask_or(&speedchange_cpumask, &speedchange_cpumask,
+			policy->cpus);
+		spin_unlock_irqrestore(&speedchange_cpumask_lock, flags);
+		cpufreq_cpu_put(policy);
+	}
+
+	if (speedchange_task)
+		wake_up_process(speedchange_task);
+	mutex_unlock(&gov_lock);
+	set_hmp_boostpulse(benchmark_mode_duration);
+
+	return 0;
+}
+
 static struct kernel_param_ops fingerprint_boostpulse_ops = {
 	.set = set_fingerprint_boostpulse,
 	.get = param_get_uint,
@@ -1001,6 +1062,13 @@ static struct kernel_param_ops launch_boostpulse_ops = {
 static unsigned int launch_boostpulse;
 module_param_cb(launch_boostpulse, &launch_boostpulse_ops,
 	&launch_boostpulse, 0200);
+
+static struct kernel_param_ops benchmark_mode_ops = {
+	.set = set_benchmark_mode,
+	.get = param_get_uint,
+};
+static unsigned int benchmark_mode;
+module_param_cb(benchmark_mode, &benchmark_mode_ops, &benchmark_mode, 0644);
 
 static void cpufreq_interactive_input_boost_work(struct work_struct *work)
 {
