@@ -125,8 +125,8 @@ fi
 export PATH=${CLANG_PATH}:${PATH}
 export CROSS_COMPILE=$CR_GCC11
 export CLANG_TRIPLE=aarch64-linux-gnu-
-export CC="clang --target=aarch64-linux-gnu"
-compile="make ARCH=arm64 HOSTCC=gcc HOSTCXX=g++"
+export KCFLAGS="--target=aarch64-linux-gnu"
+compile="make ARCH=arm64 CC=clang HOSTCC=gcc HOSTCXX=g++ LLVM=1 LLVM_IAS=1"
 fi
 }
 
