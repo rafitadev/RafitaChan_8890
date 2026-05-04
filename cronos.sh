@@ -115,12 +115,39 @@ compile="make"
 CR_COMPILER="$CR_GCC12"
 fi
 if [ $CR_COMPILER = "5" ]; then
-export CLANG_PATH=$CR_CLANG
-export CROSS_COMPILE=$CR_GCC11
+# Prefer bundled clang path, but fallback to system clang if toolchain dir is missing
+if [ -d "$CR_CLANG" ]; then
+  export CLANG_PATH=$CR_CLANG
+  export PATH=${CLANG_PATH}:${PATH}
+  CR_COMPILER="$CR_CLANG"
+else
+  export CLANG_PATH=$(dirname "$(command -v clang)")
+  export PATH=${CLANG_PATH}:${PATH}
+  CR_COMPILER="$CLANG_PATH"
+fi
+# Build arm64 kernel with LLVM toolchain only
+CR_LLVM_WRAP="$CR_DIR/.llvm-wrap/bin"
+mkdir -p "$CR_LLVM_WRAP"
+for t in gcc g++ cpp cc; do
+cat > "$CR_LLVM_WRAP/aarch64-linux-gnu-$t" <<'EOF'
+#!/bin/bash
+exec clang --target=aarch64-linux-gnu "$@"
+EOF
+chmod +x "$CR_LLVM_WRAP/aarch64-linux-gnu-$t"
+done
+for pair in "ld:ld.lld" "ar:llvm-ar" "objcopy:llvm-objcopy" "objdump:llvm-objdump"; do
+  tool=${pair%%:*}
+  bin=${pair##*:}
+  cat > "$CR_LLVM_WRAP/aarch64-linux-gnu-$tool" <<EOF
+#!/bin/bash
+exec $bin "\$@"
+EOF
+  chmod +x "$CR_LLVM_WRAP/aarch64-linux-gnu-$tool"
+done
+export PATH="$CR_LLVM_WRAP:$PATH"
+export CROSS_COMPILE=aarch64-linux-gnu-
 export CLANG_TRIPLE=aarch64-linux-gnu-
-compile="make CC=clang ARCH=arm64"
-export PATH=${CLANG_PATH}:${PATH}
-CR_COMPILER="$CR_CLANG"
+compile="make ARCH=arm64 HOSTCC=gcc HOSTCXX=g++ LLVM=1 LLVM_IAS=0"
 fi
 }
 
