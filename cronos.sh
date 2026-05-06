@@ -115,12 +115,18 @@ compile="make"
 CR_COMPILER="$CR_GCC12"
 fi
 if [ $CR_COMPILER = "5" ]; then
-export CLANG_PATH=$CR_CLANG
+if [ -d "$CR_CLANG" ]; then
+  export CLANG_PATH=$CR_CLANG
+  CR_COMPILER="$CR_CLANG"
+else
+  export CLANG_PATH=$(dirname "$(command -v clang)")
+  CR_COMPILER="$CLANG_PATH"
+fi
+export PATH=${CLANG_PATH}:${PATH}
 export CROSS_COMPILE=$CR_GCC11
 export CLANG_TRIPLE=aarch64-linux-gnu-
-compile="make CC=clang ARCH=arm64"
-export PATH=${CLANG_PATH}:${PATH}
-CR_COMPILER="$CR_CLANG"
+export KCFLAGS="--target=aarch64-linux-gnu"
+compile="make ARCH=arm64 CC=clang HOSTCC=gcc HOSTCXX=g++ LLVM=1 LLVM_IAS=1"
 fi
 }
 
