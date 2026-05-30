@@ -435,8 +435,8 @@
 		cl1_idx_num = <28>;
 		cl1_max_support_idx = <0>;
 		cl1_min_support_idx = <27>;
-		cl1_boot_max_qos = <2900000>;
-		cl1_boot_min_qos = <2900000>;
+		cl1_boot_max_qos = <3016000>;
+		cl1_boot_min_qos = <3016000>;
 		cl1_en_ema = <1>;
 		cl1_en_smpl = <1>;
 		cl1_jig_boot_max_qos = <1456000>;
@@ -482,7 +482,7 @@
 
 		/*MNGS table ->	 idx  freq    volt   bus_lock */
 		cl1_dvfs_domain_name = "dvfs_big";
-		cl1_dvfs_table = < 0 3000000 1137500   1794000 /* ARM L0: 3.0GHz  */
+		cl1_dvfs_table = < 0 3016000 1137500   1794000 /* ARM L0: 3.016GHz */
 				   1 2900000 1137500   1794000 /* ARM L1: 2.9GMHz */
 				   2 2800000 1137500   1794000 /* ARM L2: 2.8GMHz */
 				   3 2700000 1137500   1794000 /* ARM L3: 2.7GHz  */
