@@ -84,6 +84,7 @@ static void exynos_mp_cpufreq_cl1_set_ema(unsigned int volt)
 		pr_err("failed to cl1_set_ema(volt %d)\n", volt);
 }
 
+
 static int exynos_mp_cpufreq_init_smpl(void)
 {
 	int ret;
@@ -213,11 +214,15 @@ static int exynos_mp_cpufreq_init_cal_table(cluster_type cluster)
 	/* check freq_table with cal */
 	table_size = cal_dfs_get_rate_asv_table(cl_id, ptr_temp_table);
 
-	if (ptr->max_idx_num != table_size) {
-		pr_err("%s: DT is not matched cal table size\n", __func__);
+	if (table_size <= 0) {
+		pr_err("%s: failed to read PWRCAL ASV table\n", __func__);
 		kfree(ptr_temp_table);
 		return -EINVAL;
 	}
+
+	if (ptr->max_idx_num != table_size)
+		pr_warn("%s: DT table size %u differs from PWRCAL ASV table size %d; keeping DT-only OPP voltages\n",
+			__func__, ptr->max_idx_num, table_size);
 
 	cal_max_freq = cal_dfs_get_max_freq(cl_id);
 	if (!cal_max_freq) {
@@ -226,33 +231,42 @@ static int exynos_mp_cpufreq_init_cal_table(cluster_type cluster)
 		return -EINVAL;
 	}
 
-	for (i = 0; i< ptr->max_idx_num; i++) {
-		if (ptr->freq_table[i].frequency != (unsigned int)ptr_temp_table[i].rate) {
-			pr_err("%s: DT is not matched cal frequency_table(dt : %d, cal : %d\n",
-					__func__, ptr->freq_table[i].frequency,
-					(unsigned int)ptr_temp_table[i].rate);
-			kfree(ptr_temp_table);
-			return -EINVAL;
-		} else {
+	for (i = 0; i < ptr->max_idx_num; i++) {
+		unsigned int j;
+		bool found_cal_opp = false;
+
+		for (j = 0; j < table_size; j++) {
+			if (ptr->freq_table[i].frequency != (unsigned int)ptr_temp_table[j].rate)
+				continue;
+
 			/* copy cal voltage to cpufreq driver voltage table */
-			ptr->volt_table[i] = ptr_temp_table[i].volt;
+			ptr->volt_table[i] = ptr_temp_table[j].volt;
+			found_cal_opp = true;
+			break;
 		}
 
-		if (ptr_temp_table[i].rate == cal_max_freq)
+		if (!found_cal_opp)
+			pr_warn("CPUFREQ of %s DT-only OPP %u KHz keeps DT voltage %u uV\n",
+				cluster ? "CL1" : "CL0",
+				ptr->freq_table[i].frequency, ptr->volt_table[i]);
+
+		if (ptr->freq_table[i].frequency == cal_max_freq)
 			cal_max_support_idx = i;
 	}
 
-	pr_info("CPUFREQ of %s CAL max_freq %lu KHz, DT max_freq %lu\n",
-			cluster ? "CL1" : "CL0",
-			ptr_temp_table[cal_max_support_idx].rate,
-			ptr_temp_table[ptr->max_support_idx].rate);
+	pr_info("CPUFREQ of %s CAL max_freq %u KHz, DT max_freq %u KHz\n",
+			cluster ? "CL1" : "CL0", cal_max_freq,
+			ptr->freq_table[ptr->max_support_idx].frequency);
 
 	if (ptr->max_support_idx < cal_max_support_idx)
-		ptr->max_support_idx = cal_max_support_idx;
+		pr_warn("CPUFREQ of %s DT max %u KHz exceeds CAL max %u KHz; honoring DT max\n",
+			cluster ? "CL1" : "CL0",
+			ptr->freq_table[ptr->max_support_idx].frequency,
+			cal_max_freq);
 
-	pr_info("CPUFREQ of %s Current max freq %lu KHz\n",
+	pr_info("CPUFREQ of %s Current max freq %u KHz\n",
 				cluster ? "CL1" : "CL0",
-				ptr_temp_table[ptr->max_support_idx].rate);
+				ptr->freq_table[ptr->max_support_idx].frequency);
 
 	/* free temporary memory */
 	kfree(ptr_temp_table);
