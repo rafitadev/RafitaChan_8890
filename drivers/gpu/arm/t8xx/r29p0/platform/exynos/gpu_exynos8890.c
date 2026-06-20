@@ -99,8 +99,8 @@ static int mif_min_table[] = {
 };
 
 static gpu_attribute gpu_config_attributes[GPU_CONFIG_LIST_END] = {
-	{GPU_MAX_CLOCK, 650},
-	{GPU_MAX_CLOCK_LIMIT, 728},
+	{GPU_MAX_CLOCK, 806},
+	{GPU_MAX_CLOCK_LIMIT, 806},
 	{GPU_MIN_CLOCK, 260},
 	{GPU_MIN_CLOCK_LIMIT, 260},
 	{GPU_DVFS_START_CLOCK, 260},
