@@ -20,15 +20,14 @@ inline unsigned long int_sqrt(unsigned long x)
 	register unsigned long tmp;
 	register unsigned long place;
 	register unsigned long root = 0;
+	int msb;
 
 	if (x <= 1)
 		return x;
 
-	place = 1UL << (BITS_PER_LONG - 2);
-
-	do{
-		place >>= 2;
-	}while(place > x);
+	msb = fls_long(x) - 1;
+	msb &= ~1;
+	place = 1UL << msb;
 
 	do {
 		tmp = root + place;
@@ -45,4 +44,3 @@ inline unsigned long int_sqrt(unsigned long x)
 	return root;
 }
 EXPORT_SYMBOL(int_sqrt);
-
