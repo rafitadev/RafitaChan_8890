@@ -55,7 +55,9 @@ int gpu_get_debug_level(void)
 
 #ifdef CONFIG_MALI_EXYNOS_TRACE
 struct kbase_trace exynos_trace_buf[KBASE_TRACE_SIZE];
+#if KBASE_TRACE_ENABLE
 extern const struct file_operations kbasep_trace_debugfs_fops;
+#endif
 static int gpu_trace_init(struct kbase_device *kbdev)
 {
 	kbdev->trace_rbuf = exynos_trace_buf;
@@ -65,9 +67,11 @@ static int gpu_trace_init(struct kbase_device *kbdev)
 /* below work : register entry from making debugfs create file to trace_dentry
  * is same work as kbasep_trace_debugfs_init */
 #ifdef MALI_SEC_INTEGRATION
+#if KBASE_TRACE_ENABLE
 	kbdev->trace_dentry = debugfs_create_file("mali_trace", S_IRUGO,
 			kbdev->mali_debugfs_directory, kbdev,
 			&kbasep_trace_debugfs_fops);
+#endif
 #endif /* MALI_SEC_INTEGRATION */
 	return 0;
 }
