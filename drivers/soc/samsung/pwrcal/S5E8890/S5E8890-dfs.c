@@ -21,6 +21,8 @@
 #define BUS3_PLL_ENABLE_THRESHOLD	1600000
 #define MIF_SWITCH_FREQ_HIGH	936000
 #define MIF_SWITCH_FREQ_LOW	528000
+#define EXYNOS8890_OC_BIG_KHZ	2704000
+#define EXYNOS8890_OC_LIT_KHZ	1716000
 
 static unsigned int dfs_mif_resume_level = 9;
 unsigned int dfsmif_paraset;
@@ -1407,6 +1409,51 @@ void dfs_set_clk_information(struct pwrcal_vclk_dfs *dfs)
 
 }
 
+static void exynos8890_dfs_inject_oc_level(struct pwrcal_vclk_dfs *dfs, unsigned int target_khz)
+{
+	struct dfs_table *table;
+	unsigned int *new_rate_table;
+	unsigned int members, old_lv, max_lv = 0, i;
+	unsigned int old_max = 0;
+
+	if (!dfs || !dfs->table || !dfs->table->rate_table)
+		return;
+
+	table = dfs->table;
+	members = table->num_of_members;
+	old_lv = table->num_of_lv;
+	if (!members || !old_lv)
+		return;
+
+	for (i = 0; i < old_lv; i++) {
+		unsigned int f = table->rate_table[i * members];
+		if (f >= old_max) {
+			old_max = f;
+			max_lv = i;
+		}
+	}
+
+	if (old_max >= target_khz) {
+		if (table->max_freq < old_max)
+			table->max_freq = old_max;
+		return;
+	}
+
+	new_rate_table = kzalloc(sizeof(unsigned int) * members * (old_lv + 1), GFP_KERNEL);
+	if (!new_rate_table)
+		return;
+
+	memcpy(new_rate_table, table->rate_table, sizeof(unsigned int) * members * old_lv);
+	memcpy(&new_rate_table[old_lv * members], &table->rate_table[max_lv * members],
+	       sizeof(unsigned int) * members);
+	new_rate_table[old_lv * members] = target_khz;
+
+	kfree(table->rate_table);
+	table->rate_table = new_rate_table;
+	table->num_of_lv = old_lv + 1;
+	table->max_freq = target_khz;
+}
+
 void dfs_set_pscdc_information(void)
 {
 	int i;
@@ -1444,6 +1491,10 @@ void dfs_init(void)
 	dfs_set_clk_information(&vclk_dvfs_cam);
 	dfs_set_clk_information(&vclk_dvfs_disp);
 	dfs_set_clk_information(&vclk_dvs_g3dm);
+
+	/* Inject OC OPP placeholders to avoid "frequency not found" on custom OC userspace */
+	exynos8890_dfs_inject_oc_level(&vclk_dvfs_big, EXYNOS8890_OC_BIG_KHZ);
+	exynos8890_dfs_inject_oc_level(&vclk_dvfs_little, EXYNOS8890_OC_LIT_KHZ);
 
 	dfs_dram_init();
 	dfs_set_pscdc_information();
