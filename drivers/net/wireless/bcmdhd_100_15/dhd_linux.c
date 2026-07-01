@@ -546,6 +546,8 @@ uint dhd_console_ms = 0;
 
 uint dhd_slpauto = TRUE;
 module_param(dhd_slpauto, uint, 0);
+uint dhd_wifi_highperf_mode = 1;
+module_param(dhd_wifi_highperf_mode, uint, 0644);
 
 #ifdef PKT_FILTER_SUPPORT
 /* Global Pkt filter enable control */
@@ -2122,6 +2124,8 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 #endif /* DYNAMIC_SWOOB_DURATION */
 #ifndef SUPPORT_PM2_ONLY
 				power_mode = PM_FAST;
+				if (dhd_wifi_highperf_mode)
+					power_mode = PM_OFF;
 				dhd_wl_ioctl_cmd(dhd, WLC_SET_PM, (char *)&power_mode,
 				                 sizeof(power_mode), TRUE, 0);
 #endif /* SUPPORT_PM2_ONLY */
