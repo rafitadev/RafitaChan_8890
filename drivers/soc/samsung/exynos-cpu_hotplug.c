@@ -15,6 +15,7 @@
 #include <linux/kthread.h>
 #include <linux/pm_qos.h>
 #include <linux/suspend.h>
+#include <linux/exynos-ss.h>
 
 static int cpu_hotplug_in(const struct cpumask *mask)
 {
@@ -233,12 +234,9 @@ static void cpu_hotplug_work(struct work_struct *work)
 	do_cpu_hotplug(NULL);
 }
 
-extern int ess_boot_logging;
-
 static void force_panic_work(struct work_struct *work)
 {
 	pr_err("force panic by force_panic_work\n");
-	ess_boot_logging = 0;
 }
 
 static int control_cpu_hotplug(bool enable)
