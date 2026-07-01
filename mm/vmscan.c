@@ -140,7 +140,7 @@ struct scan_control {
 /*
  * From 0 .. 100.  Higher means more swappy.
  */
-int vm_swappiness = 160;
+int vm_swappiness = 180;
 /*
  * The total number of pages which are beyond the high watermark within all
  * zones.
@@ -2015,7 +2015,9 @@ enum mem_boost {
 };
 static int mem_boost_mode = NO_BOOST;
 static unsigned long last_mode_change;
+static unsigned long last_kswapd_boost_jiffies;
 static bool memory_boosting_disabled = false;
+static unsigned int mem_boost_kswapd_throttle_ms = 12;
 
 #define MEM_BOOST_MAX_TIME (5 * HZ) /* 5 sec */
 
@@ -2113,9 +2115,36 @@ static ssize_t disable_mem_boost_store(struct kobject *kobj,
 MEM_BOOST_ATTR(mem_boost_mode);
 MEM_BOOST_ATTR(disable_mem_boost);
 
+static ssize_t mem_boost_kswapd_throttle_ms_show(struct kobject *kobj,
+				    struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", mem_boost_kswapd_throttle_ms);
+}
+
+static ssize_t mem_boost_kswapd_throttle_ms_store(struct kobject *kobj,
+				     struct kobj_attribute *attr,
+				     const char *buf, size_t count)
+{
+	int val;
+	int err;
+
+	err = kstrtoint(buf, 10, &val);
+	if (err || val < 0 || val > 200)
+		return -EINVAL;
+
+	mem_boost_kswapd_throttle_ms = val;
+	return count;
+}
+
+static struct kobj_attribute mem_boost_kswapd_throttle_ms_attr =
+	__ATTR(mem_boost_kswapd_throttle_ms, 0644,
+		mem_boost_kswapd_throttle_ms_show,
+		mem_boost_kswapd_throttle_ms_store);
+
 static struct attribute *mem_boost_attrs[] = {
 	&mem_boost_mode_attr.attr,
 	&disable_mem_boost_attr.attr,
+	&mem_boost_kswapd_throttle_ms_attr.attr,
 	NULL,
 };
 
@@ -3311,6 +3340,17 @@ static bool kswapd_shrink_zone(struct zone *zone,
 	    zone_balanced(zone, testorder, 0, classzone_idx)) {
 		clear_bit(ZONE_CONGESTED, &zone->flags);
 		clear_bit(ZONE_DIRTY, &zone->flags);
+	}
+
+	if (need_memory_boosting(zone) && mem_boost_kswapd_throttle_ms) {
+		unsigned long throttle_jiffies =
+			msecs_to_jiffies(mem_boost_kswapd_throttle_ms);
+		unsigned long now = jiffies;
+
+		if (time_before(now, last_kswapd_boost_jiffies + throttle_jiffies))
+			msleep(mem_boost_kswapd_throttle_ms);
+
+		last_kswapd_boost_jiffies = jiffies;
 	}
 
 	return sc->nr_scanned >= sc->nr_to_reclaim;
