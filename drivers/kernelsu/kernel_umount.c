@@ -82,6 +82,17 @@ static void try_umount(const char *mnt, int flags)
 {
 	struct path path;
 	int ret = 0;
+
+	/*
+	 * Android 12+ mount namespace stability guard:
+	 * never attempt to umount APEX/loop-critical mount roots.
+	 */
+	if (!strncmp(mnt, "/apex", 5) ||
+	    !strncmp(mnt, "/system/apex", 12) ||
+	    !strncmp(mnt, "/linkerconfig", 13) ||
+	    !strncmp(mnt, "/mnt/loop", 9))
+		return;
+
 	if (kern_path(mnt, 0, &path)) {
 		return;
 	}
