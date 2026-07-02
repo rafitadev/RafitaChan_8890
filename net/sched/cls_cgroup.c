@@ -30,45 +30,22 @@ static int cls_cgroup_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 			       struct tcf_result *res)
 {
 	struct cls_cgroup_head *head = rcu_dereference_bh(tp->root);
-	u32 classid;
-
-	classid = task_cls_state(current)->classid;
-
-	/*
-	 * Due to the nature of the classifier it is required to ignore all
-	 * packets originating from softirq context as accessing `current'
-	 * would lead to false results.
-	 *
-	 * This test assumes that all callers of dev_queue_xmit() explicitely
-	 * disable bh. Knowing this, it is possible to detect softirq based
-	 * calls by looking at the number of nested bh disable calls because
-	 * softirqs always disables bh.
-	 */
-	if (in_serving_softirq()) {
-		/* If there is an sk_classid we'll use that. */
-		if (!skb->sk)
-			return -1;
-		classid = skb->sk->sk_classid;
-	}
+	u32 classid = task_get_classid(skb);
 
 	if (!classid)
 		return -1;
-
 	if (!tcf_em_tree_match(skb, &head->ematches, NULL))
 		return -1;
 
 	res->classid = classid;
 	res->class = 0;
+
 	return tcf_exts_exec(skb, &head->exts, res);
 }
 
 static unsigned long cls_cgroup_get(struct tcf_proto *tp, u32 handle)
 {
 	return 0UL;
-}
-
-static void cls_cgroup_put(struct tcf_proto *tp, unsigned long f)
-{
 }
 
 static int cls_cgroup_init(struct tcf_proto *tp)
@@ -151,14 +128,18 @@ errout:
 	return err;
 }
 
-static void cls_cgroup_destroy(struct tcf_proto *tp)
+static bool cls_cgroup_destroy(struct tcf_proto *tp, bool force)
 {
 	struct cls_cgroup_head *head = rtnl_dereference(tp->root);
+
+	if (!force)
+		return false;
 
 	if (head) {
 		RCU_INIT_POINTER(tp->root, NULL);
 		call_rcu(&head->rcu, cls_cgroup_destroy_rcu);
 	}
+	return true;
 }
 
 static int cls_cgroup_delete(struct tcf_proto *tp, unsigned long arg)
@@ -217,7 +198,6 @@ static struct tcf_proto_ops cls_cgroup_ops __read_mostly = {
 	.classify	=	cls_cgroup_classify,
 	.destroy	=	cls_cgroup_destroy,
 	.get		=	cls_cgroup_get,
-	.put		=	cls_cgroup_put,
 	.delete		=	cls_cgroup_delete,
 	.walk		=	cls_cgroup_walk,
 	.dump		=	cls_cgroup_dump,
