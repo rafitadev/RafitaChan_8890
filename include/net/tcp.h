@@ -304,6 +304,7 @@ extern int sysctl_tcp_limit_output_bytes;
 extern int sysctl_tcp_challenge_ack_limit;
 extern unsigned int sysctl_tcp_notsent_lowat;
 extern int sysctl_tcp_min_tso_segs;
+extern int sysctl_tcp_min_rtt_wlen;
 extern int sysctl_tcp_autocorking;
 extern int sysctl_tcp_default_init_rwnd;
 
@@ -728,7 +729,7 @@ static inline int tcp_bound_to_half_wnd(struct tcp_sock *tp, int pktsize)
 }
 
 /* tcp.c */
-void tcp_get_info(const struct sock *, struct tcp_info *);
+void tcp_get_info(struct sock *, struct tcp_info *);
 
 /* Read 'sendfile()'-style from a TCP socket */
 typedef int (*sk_read_actor_t)(read_descriptor_t *, struct sk_buff *,
@@ -791,6 +792,12 @@ static inline u32 tcp_rto_min(struct sock *sk)
 static inline u32 tcp_rto_min_us(struct sock *sk)
 {
 	return jiffies_to_usecs(tcp_rto_min(sk));
+}
+
+/* Minimum RTT in usec. ~0 means not available. */
+static inline u32 tcp_min_rtt(const struct tcp_sock *tp)
+{
+	return tp->rtt_min[0].rtt;
 }
 
 /* Compute the actual receive window we are currently advertising.
@@ -1240,6 +1247,7 @@ static inline void tcp_prequeue_init(struct tcp_sock *tp)
 }
 
 bool tcp_prequeue(struct sock *sk, struct sk_buff *skb);
+int tcp_filter(struct sock *sk, struct sk_buff *skb);
 
 #undef STATE_TRACE
 
