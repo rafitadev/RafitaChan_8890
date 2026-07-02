@@ -111,10 +111,6 @@ static unsigned long fw_get(struct tcf_proto *tp, u32 handle)
 	return 0;
 }
 
-static void fw_put(struct tcf_proto *tp, unsigned long f)
-{
-}
-
 static int fw_init(struct tcf_proto *tp)
 {
 	return 0;
@@ -128,14 +124,20 @@ static void fw_delete_filter(struct rcu_head *head)
 	kfree(f);
 }
 
-static void fw_destroy(struct tcf_proto *tp)
+static bool fw_destroy(struct tcf_proto *tp, bool force)
 {
 	struct fw_head *head = rtnl_dereference(tp->root);
 	struct fw_filter *f;
 	int h;
 
 	if (head == NULL)
-		return;
+		return true;
+
+	if (!force) {
+		for (h = 0; h < HTSIZE; h++)
+			if (rcu_access_pointer(head->ht[h]))
+				return false;
+	}
 
 	for (h = 0; h < HTSIZE; h++) {
 		while ((f = rtnl_dereference(head->ht[h])) != NULL) {
@@ -147,6 +149,7 @@ static void fw_destroy(struct tcf_proto *tp)
 	}
 	RCU_INIT_POINTER(tp->root, NULL);
 	kfree_rcu(head, rcu);
+	return true;
 }
 
 static int fw_delete(struct tcf_proto *tp, unsigned long arg)
@@ -411,7 +414,6 @@ static struct tcf_proto_ops cls_fw_ops __read_mostly = {
 	.init		=	fw_init,
 	.destroy	=	fw_destroy,
 	.get		=	fw_get,
-	.put		=	fw_put,
 	.change		=	fw_change,
 	.delete		=	fw_delete,
 	.walk		=	fw_walk,
