@@ -485,6 +485,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct request_sock *req,
 
 		newtp->rcv_wup = newtp->copied_seq =
 		newtp->rcv_nxt = treq->rcv_isn + 1;
+		newtp->segs_in = 0;
 
 		newtp->snd_sml = newtp->snd_una =
 		newtp->snd_nxt = newtp->snd_up = treq->snt_isn + 1;
@@ -496,6 +497,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct request_sock *req,
 
 		newtp->srtt_us = 0;
 		newtp->mdev_us = jiffies_to_usecs(TCP_TIMEOUT_INIT);
+		newtp->rtt_min[0].rtt = ~0U;
 		newicsk->icsk_rto = TCP_TIMEOUT_INIT;
 		newicsk->icsk_ack.lrcvtime = tcp_time_stamp;
 
