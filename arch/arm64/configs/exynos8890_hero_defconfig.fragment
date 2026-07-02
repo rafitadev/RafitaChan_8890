@@ -1,0 +1,85 @@
+# Exynos 8890 (S7/S7E/N7) OneUI 4.1 max-performance fragment
+# Target base: hero_defconfig / exynos8890_defconfig.
+# NOTE: symbols missing from this tree are kept as TODO/backport markers.
+
+# -----------------------------------------------------------------------------
+# 1) Desbloqueio total de núcleos / CPU Boosters
+# -----------------------------------------------------------------------------
+CONFIG_SCHED_TUNE=y
+CONFIG_SCHED_WALT=y
+CONFIG_CPU_FREQ_GOV_INTERACTIVE=y
+CONFIG_HOTPLUG_CPU=y
+# TODO(backport): requested symbols not found in this tree (defconfig will ignore)
+# CONFIG_CPU_BOOST is not set
+# CONFIG_FINGERPRINT_BOOST is not set
+# CONFIG_TOUCHSCREEN_BOOST is not set
+# CONFIG_ALLOW_4_CORES_MAX_FREQ is not set
+# CONFIG_CPU_FREQ_LIMIT_START_FREQ is not set
+# CONFIG_CPU_BOOST_FREQ is not set
+
+# -----------------------------------------------------------------------------
+# 2) GPU/Bus performance
+# -----------------------------------------------------------------------------
+# TODO(backport): requested symbols not found in this tree
+# CONFIG_MALI_BIFROST_FOR_SW_DEVELOPER is not set
+# CONFIG_MALI_GONDUL_LATE_DVFS is not set
+# CONFIG_EXYNOS_DEVFREQ_HIERARCHY is not set
+
+# -----------------------------------------------------------------------------
+# 3) Pageboost + RAM/IO
+# -----------------------------------------------------------------------------
+CONFIG_SAMSUNG_PAGEBOOST=y
+CONFIG_PAGEBOOST_IO_BOOST=y
+# TODO(backport): requested symbol not found in this tree
+# CONFIG_PAGEBOOST_PREFETCH is not set
+# CONFIG_SCHED_BOOST is not set
+CONFIG_ZRAM=y
+CONFIG_ZRAM_LZ4_COMPRESS=y
+# CONFIG_ZRAM_WRITEBACK is not set
+# CONFIG_CMA_DEBUG is not set
+# Keep CMA larger for GPU-heavy use-cases
+CONFIG_CMA=y
+CONFIG_CMA_SIZE_SEL_MBYTES=y
+CONFIG_CMA_SIZE_MBYTES=128
+CONFIG_IOSCHED_DEADLINE=y
+# CONFIG_DEFAULT_CFQ is not set
+CONFIG_DEFAULT_DEADLINE=y
+CONFIG_DEFAULT_IOSCHED="deadline"
+CONFIG_ZSWAP=y
+
+# -----------------------------------------------------------------------------
+# 4) Debug/overhead cleanup
+# -----------------------------------------------------------------------------
+# CONFIG_DEBUG_KERNEL is not set
+# CONFIG_DEBUG_SPINLOCK is not set
+# CONFIG_DEBUG_MUTEXES is not set
+# CONFIG_LOCKDEP is not set
+# CONFIG_SCHED_DEBUG is not set
+# CONFIG_PRINTK_TIME is not set
+# CONFIG_SCHEDSTATS is not set
+# CONFIG_SEC_DEBUG is not set
+# CONFIG_SEC_DEBUG_LAST_KMSG is not set
+# CONFIG_KNOX_KAP is not set
+# CONFIG_RKP_KDP is not set
+# CONFIG_FTRACE is not set
+# CONFIG_KPROBES is not set
+# CONFIG_PROFILING is not set
+# CONFIG_TIMA is not set
+
+# -----------------------------------------------------------------------------
+# 5) ASV / OV-UV controls
+# -----------------------------------------------------------------------------
+# TODO(backport): requested symbols not found in this tree
+# CONFIG_EXYNOS_ASV is not set
+# CONFIG_EXYNOS_OV_UV is not set
+
+# -----------------------------------------------------------------------------
+# 6) RCU/tick responsiveness profile (use only if symbols exist in base tree)
+# -----------------------------------------------------------------------------
+CONFIG_HZ_300=y
+# CONFIG_HZ_100 is not set
+# CONFIG_HZ_250 is not set
+# CONFIG_NO_HZ_IDLE is not set
+CONFIG_HIGH_RES_TIMERS=y
+CONFIG_RCU_BOOST=y
+CONFIG_RCU_FANOUT=32
