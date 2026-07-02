@@ -1,0 +1,40 @@
+# OneUI6 perftune service (template)
+# Import this file from your device init.rc:
+#   import /init.perftune.rc
+
+service app_launch_boost_tiktok /system/bin/sh /vendor/bin/app_launch_boost.sh com.ss.android.ugc.trill
+    class main
+    user root
+    group root
+    disabled
+    oneshot
+
+service app_launch_boost_instagram /system/bin/sh /vendor/bin/app_launch_boost.sh com.instagram.android
+    class main
+    user root
+    group root
+    disabled
+    oneshot
+
+service app_launch_boost_whatsapp /system/bin/sh /vendor/bin/app_launch_boost.sh com.whatsapp
+    class main
+    user root
+    group root
+    disabled
+    oneshot
+
+# Property driven trigger from framework/perfd wrapper.
+# Example:
+#   setprop sys.perf.launch com.instagram.android
+on property:sys.perf.launch=com.ss.android.ugc.trill
+    start app_launch_boost_tiktok
+
+on property:sys.perf.launch=com.instagram.android
+    start app_launch_boost_instagram
+
+on property:sys.perf.launch=com.whatsapp
+    start app_launch_boost_whatsapp
+
+# Generic fallback trigger
+on property:sys.perf.launch=*
+    exec_start app_launch_boost_instagram
