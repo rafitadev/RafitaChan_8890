@@ -256,10 +256,6 @@ static unsigned long route4_get(struct tcf_proto *tp, u32 handle)
 	return 0;
 }
 
-static void route4_put(struct tcf_proto *tp, unsigned long f)
-{
-}
-
 static int route4_init(struct tcf_proto *tp)
 {
 	return 0;
@@ -274,13 +270,20 @@ route4_delete_filter(struct rcu_head *head)
 	kfree(f);
 }
 
-static void route4_destroy(struct tcf_proto *tp)
+static bool route4_destroy(struct tcf_proto *tp, bool force)
 {
 	struct route4_head *head = rtnl_dereference(tp->root);
 	int h1, h2;
 
 	if (head == NULL)
-		return;
+		return true;
+
+	if (!force) {
+		for (h1 = 0; h1 <= 256; h1++) {
+			if (rcu_access_pointer(head->table[h1]))
+				return false;
+		}
+	}
 
 	for (h1 = 0; h1 <= 256; h1++) {
 		struct route4_bucket *b;
@@ -305,6 +308,7 @@ static void route4_destroy(struct tcf_proto *tp)
 	}
 	RCU_INIT_POINTER(tp->root, NULL);
 	kfree_rcu(head, rcu);
+	return true;
 }
 
 static int route4_delete(struct tcf_proto *tp, unsigned long arg)
@@ -649,7 +653,6 @@ static struct tcf_proto_ops cls_route4_ops __read_mostly = {
 	.init		=	route4_init,
 	.destroy	=	route4_destroy,
 	.get		=	route4_get,
-	.put		=	route4_put,
 	.change		=	route4_change,
 	.delete		=	route4_delete,
 	.walk		=	route4_walk,
