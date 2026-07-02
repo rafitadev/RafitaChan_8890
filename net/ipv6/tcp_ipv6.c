@@ -143,6 +143,19 @@ __u32 tcp_v6_init_sequence(const struct sk_buff *skb)
 					    tcp_hdr(skb)->source);
 }
 
+static int tcp_v6_pre_connect(struct sock *sk, struct sockaddr *uaddr,
+			      int addr_len)
+{
+	/* This check is replicated from tcp_v6_connect() and intended to
+	 * prevent BPF program called below from accessing bytes that are out
+	 * of the bound specified by user in addr_len.
+	 */
+	if (addr_len < SIN6_LEN_RFC2133)
+		return -EINVAL;
+
+	return BPF_CGROUP_RUN_PROG_INET6_CONNECT(sk, uaddr);
+}
+
 #ifndef CONFIG_MPTCP
 static 
 #endif
@@ -1501,8 +1514,6 @@ int tcp_v6_do_rcv(struct sock *sk, struct sk_buff *skb)
 	if (is_meta_sk(sk))
 		return mptcp_v6_do_rcv(sk, skb);
 #endif
-	if (sk_filter(sk, skb))
-		goto discard;
 
 	/*
 	 *	socket locking is here for SMP purposes as backlog rcv
@@ -1529,6 +1540,7 @@ int tcp_v6_do_rcv(struct sock *sk, struct sk_buff *skb)
 		struct dst_entry *dst = sk->sk_rx_dst;
 
 		sock_rps_save_rxhash(sk, skb);
+		sk_mark_napi_id(sk, skb);
 		if (dst) {
 			if (inet_sk(sk)->rx_dst_ifindex != skb->skb_iif ||
 			    dst->ops->check(dst, np->rx_dst_cookie) == NULL) {
@@ -1558,6 +1570,7 @@ int tcp_v6_do_rcv(struct sock *sk, struct sk_buff *skb)
 		 */
 		if (nsk != sk) {
 			sock_rps_save_rxhash(nsk, skb);
+			sk_mark_napi_id(sk, skb);
 			if (tcp_child_process(sk, nsk, skb))
 				goto reset;
 			if (opt_skb)
@@ -1724,10 +1737,12 @@ process:
 		goto discard_and_relse;
 #endif
 
-	if (sk_filter(sk, skb))
+	if (tcp_filter(sk, skb))
 		goto discard_and_relse;
+	th = (const struct tcphdr *)skb->data;
+	hdr = ipv6_hdr(skb);
 
-	sk_mark_napi_id(sk, skb);
+	sk_incoming_cpu_update(sk);
 	skb->dev = NULL;
 
 #ifdef CONFIG_MPTCP
@@ -1745,6 +1760,7 @@ process:
 	}
 #endif
 
+	tcp_sk(sk)->segs_in += max_t(u16, 1, skb_shinfo(skb)->gso_segs);
 	ret = 0;
 #ifdef CONFIG_MPTCP
 	if (!sock_owned_by_user(meta_sk)) {
@@ -2231,6 +2247,7 @@ struct proto tcpv6_prot = {
 	.name			= "TCPv6",
 	.owner			= THIS_MODULE,
 	.close			= tcp_close,
+	.pre_connect		= tcp_v6_pre_connect,
 	.connect		= tcp_v6_connect,
 	.disconnect		= tcp_disconnect,
 	.accept			= inet_csk_accept,
