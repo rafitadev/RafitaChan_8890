@@ -35,6 +35,7 @@
 #include <linux/spinlock.h>
 #include <linux/preempt.h>
 #include <linux/lockdep.h>
+#include <linux/compiler.h>
 #include <asm/processor.h>
 
 /*
@@ -263,6 +264,14 @@ static inline void write_seqcount_end(seqcount_t *s)
 {
 	seqcount_release(&s->dep_map, 1, _RET_IP_);
 	raw_write_seqcount_end(s);
+}
+
+static inline int raw_read_seqcount_latch(seqcount_t *s)
+{
+	int seq = READ_ONCE(s->sequence);
+	/* Pairs with the first smp_wmb() in raw_write_seqcount_latch() */
+	smp_read_barrier_depends();
+	return seq;
 }
 
 /**
