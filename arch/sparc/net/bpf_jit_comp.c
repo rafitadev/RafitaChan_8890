@@ -10,8 +10,6 @@
 
 #include "bpf_jit.h"
 
-int bpf_jit_enable __read_mostly;
-
 static inline bool is_simm13(unsigned int value)
 {
 	return value + 0x1000 < 0x2000;
@@ -763,7 +761,7 @@ cond_branch:			f_offset = addrs[i + filter[i].jf];
 				if (unlikely(proglen + ilen > oldproglen)) {
 					pr_err("bpb_jit_compile fatal error\n");
 					kfree(addrs);
-					module_free(NULL, image);
+					module_memfree(image);
 					return;
 				}
 				memcpy(image + proglen, temp, ilen);
@@ -799,7 +797,7 @@ cond_branch:			f_offset = addrs[i + filter[i].jf];
 	if (image) {
 		bpf_flush_icache(image, image + proglen);
 		fp->bpf_func = (void *)image;
-		fp->jited = true;
+		fp->jited = 1;
 	}
 out:
 	kfree(addrs);
@@ -809,7 +807,7 @@ out:
 void bpf_jit_free(struct bpf_prog *fp)
 {
 	if (fp->jited)
-		module_free(NULL, fp->bpf_func);
+		module_memfree(fp->bpf_func);
 
 	bpf_prog_unlock_free(fp);
 }
