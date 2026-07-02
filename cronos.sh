@@ -38,13 +38,13 @@ CR_KERNEL=$CR_DIR/arch/arm64/boot/Image
 # Compiled dtb by dtbtool
 CR_DTB=$CR_DIR/arch/arm64/boot/dtb.img
 # Kernel Name and Version
-CR_VERSION=V13.0
-CR_NAME=RafitaChan
+CR_VERSION=V18.1.4.2.0
+CR_NAME=RafitaChanMixAlpha
 # Thread count
 CR_JOBS=$(nproc --all)
 # Target Android version
-CR_ANDROID=p
-CR_PLATFORM=9.0.0
+CR_ANDROID=q
+CR_PLATFORM=10
 # Target ARCH
 CR_ARCH=arm64
 # Current Date
@@ -199,7 +199,7 @@ BUILD_GENERATE_CONFIG()
   if [ $CR_SELINUX = "1" ]; then
     echo " Building Permissive Kernel"
     echo "CONFIG_ALWAYS_PERMISSIVE=y" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
-    CR_IMAGE_NAME=$CR_IMAGE_NAME-Permissive
+    CR_IMAGE_NAME=$CR_IMAGE_NAME-PMSV
     zver=$zver-Permissive
   fi
   # Invert HALIC Readout when targeting OneUI Q
@@ -216,7 +216,6 @@ BUILD_GENERATE_CONFIG()
   if [ $CR_KSU = "y" ]; then
     echo " Building KernelSU Kernel"
     echo "CONFIG_KSU=y" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig
-    echo "CONFIG_KSU_MANUAL_HOOK=y" >> $CR_DIR/arch/$CR_ARCH/configs/tmp_defconfig 
     CR_IMAGE_NAME=$CR_IMAGE_NAME-ksu
     zver=$zver-KernelSU
   else
@@ -587,9 +586,8 @@ fi
 #{
 #if [ $CR_ROOT = 1 ]; then
 #     echo " "
-#     echo " WARNING : SukiSU-Ultra Enabled!"
+#     echo " WARNING : KernelSU Enabled!"
 #     mv $CR_PRODUCT/$CR_IMAGE_NAME.img $CR_PRODUCT/$CR_IMAGE_NAME-KernelSU.img
 #     CR_IMAGE_NAME=$CR_IMAGE_NAME-KernelSU
 #fi
 #}
-
