@@ -116,13 +116,6 @@ static unsigned long tcindex_get(struct tcf_proto *tp, u32 handle)
 	return r && tcindex_filter_is_set(r) ? (unsigned long) r : 0UL;
 }
 
-
-static void tcindex_put(struct tcf_proto *tp, unsigned long f)
-{
-	pr_debug("tcindex_put(tp %p,f 0x%lx)\n", tp, f);
-}
-
-
 static int tcindex_init(struct tcf_proto *tp)
 {
 	struct tcindex_data *p;
@@ -473,10 +466,13 @@ static void tcindex_walk(struct tcf_proto *tp, struct tcf_walker *walker)
 	}
 }
 
-static void tcindex_destroy(struct tcf_proto *tp)
+static bool tcindex_destroy(struct tcf_proto *tp, bool force)
 {
 	struct tcindex_data *p = rtnl_dereference(tp->root);
 	struct tcf_walker walker;
+
+	if (!force)
+		return false;
 
 	pr_debug("tcindex_destroy(tp %p),p %p\n", tp, p);
 	walker.count = 0;
@@ -486,6 +482,7 @@ static void tcindex_destroy(struct tcf_proto *tp)
 
 	RCU_INIT_POINTER(tp->root, NULL);
 	call_rcu(&p->rcu, __tcindex_destroy);
+	return true;
 }
 
 
@@ -558,7 +555,6 @@ static struct tcf_proto_ops cls_tcindex_ops __read_mostly = {
 	.init		=	tcindex_init,
 	.destroy	=	tcindex_destroy,
 	.get		=	tcindex_get,
-	.put		=	tcindex_put,
 	.change		=	tcindex_change,
 	.delete		=	tcindex_delete,
 	.walk		=	tcindex_walk,
