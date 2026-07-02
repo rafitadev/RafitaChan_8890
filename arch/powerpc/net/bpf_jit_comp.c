@@ -17,8 +17,6 @@
 
 #include "bpf_jit.h"
 
-int bpf_jit_enable __read_mostly;
-
 static inline void bpf_flush_icache(void *start, void *end)
 {
 	smp_wmb();
@@ -677,7 +675,7 @@ void bpf_jit_compile(struct bpf_prog *fp)
 		((u64 *)image)[0] = (u64)code_base;
 		((u64 *)image)[1] = local_paca->kernel_toc;
 		fp->bpf_func = (void *)image;
-		fp->jited = true;
+		fp->jited = 1;
 	}
 out:
 	kfree(addrs);
@@ -687,7 +685,7 @@ out:
 void bpf_jit_free(struct bpf_prog *fp)
 {
 	if (fp->jited)
-		module_free(NULL, fp->bpf_func);
+		module_memfree(fp->bpf_func);
 
 	bpf_prog_unlock_free(fp);
 }
