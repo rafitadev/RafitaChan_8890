@@ -120,6 +120,11 @@ static inline __wsum csum_partial_ext(const void *buff, int len, __wsum sum)
 
 #define CSUM_MANGLED_0 ((__force __sum16)0xffff)
 
+static inline void csum_replace_by_diff(__sum16 *sum, __wsum diff)
+{
+	*sum = csum_fold(csum_add(diff, ~csum_unfold(*sum)));
+}
+
 static inline void csum_replace4(__sum16 *sum, __be32 from, __be32 to)
 {
 	*sum = csum_fold(csum_add(csum_sub(~csum_unfold(*sum), from), to));
@@ -151,4 +156,6 @@ static inline void inet_proto_csum_replace2(__sum16 *sum, struct sk_buff *skb,
 				 (__force __be32)to, pseudohdr);
 }
 
+void inet_proto_csum_replace_by_diff(__sum16 *sum, struct sk_buff *skb,
+				     __wsum diff, bool pseudohdr);
 #endif
