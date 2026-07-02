@@ -57,6 +57,8 @@ struct dst_entry {
 #define DST_FAKE_RTABLE		0x0040
 #define DST_XFRM_TUNNEL		0x0080
 #define DST_XFRM_QUEUE		0x0100
+#define DST_METADATA		0x0200
+#define DST_NOGC		0x0400
 
 	unsigned short		pending_confirm;
 
@@ -270,6 +272,8 @@ static inline struct dst_entry *dst_clone(struct dst_entry *dst)
 
 void dst_release(struct dst_entry *dst);
 
+void dst_release_immediate(struct dst_entry *dst);
+
 static inline void refdst_drop(unsigned long refdst)
 {
 	if (!(refdst & SKB_DST_NOREF))
@@ -321,7 +325,7 @@ static inline void skb_dst_force(struct sk_buff *skb)
  */
 static inline bool dst_hold_safe(struct dst_entry *dst)
 {
-	if (dst->flags & DST_NOCACHE)
+	if (dst->flags & (DST_NOCACHE | DST_NOGC))
 		return atomic_inc_not_zero(&dst->__refcnt);
 	dst_hold(dst);
 	return true;
@@ -407,6 +411,9 @@ static inline int dst_discard(struct sk_buff *skb)
 }
 void *dst_alloc(struct dst_ops *ops, struct net_device *dev, int initial_ref,
 		int initial_obsolete, unsigned short flags);
+void dst_init(struct dst_entry *dst, struct dst_ops *ops,
+	      struct net_device *dev, int initial_ref, int initial_obsolete,
+	      unsigned short flags);
 void __dst_free(struct dst_entry *dst);
 struct dst_entry *dst_destroy(struct dst_entry *dst);
 
@@ -508,7 +515,7 @@ static inline struct dst_entry *dst_check(struct dst_entry *dst, u32 cookie)
 	return dst;
 }
 
-void dst_init(void);
+void dst_subsys_init(void);
 
 /* Flags for xfrm_lookup flags argument. */
 enum {
@@ -556,5 +563,18 @@ static inline struct xfrm_state *dst_xfrm(const struct dst_entry *dst)
 	return dst->xfrm;
 }
 #endif
+
+
+static inline u32 dst_tclassid(const struct sk_buff *skb)
+{
+#ifdef CONFIG_IP_ROUTE_CLASSID
+       const struct dst_entry *dst;
+
+       dst = skb_dst(skb);
+       if (dst)
+               return dst->tclassid;
+#endif
+       return 0;
+}
 
 #endif /* _NET_DST_H */
