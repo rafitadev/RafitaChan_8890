@@ -66,6 +66,7 @@ obj-$(CONFIG_USE_MUIC)      += muic/
 
 obj-$(CONFIG_PARPORT)		+= parport/
 obj-y				+= base/ block/ misc/ mfd/ nfc/
+obj-$(CONFIG_OPLUS_HEALTHINFO)	+= oplus_healthinfo/
 obj-$(CONFIG_DMA_SHARED_BUFFER) += dma-buf/
 obj-$(CONFIG_NUBUS)		+= nubus/
 obj-y				+= macintosh/
