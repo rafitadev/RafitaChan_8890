@@ -2531,6 +2531,7 @@ unsigned long nr_iowait(void)
 
 	return sum;
 }
+EXPORT_SYMBOL_GPL(nr_iowait);
 
 unsigned long nr_iowait_cpu(int cpu)
 {

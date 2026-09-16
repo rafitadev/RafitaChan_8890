@@ -1,0 +1,12 @@
+config OPLUS_HEALTHINFO
+	tristate "OPLUS health information procfs interface"
+	depends on PROC_FS
+	help
+	  Provide the small /proc/oplus_healthinfo interface expected by
+	  OPLUS/ColorOS userspace.  It exposes the current number of system-wide
+	  I/O waiters and a writable alias for vm.swappiness.
+
+	  This is intentionally limited to the two documented proc nodes and does
+	  not implement any device-specific health monitoring.
+
+	  If built as a module, it is called oplus_healthinfo.
