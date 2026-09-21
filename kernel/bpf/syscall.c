@@ -317,7 +317,7 @@ static int bpf_obj_name_cpy(char *dst, const char *src)
 	return 0;
 }
 
-#define BPF_MAP_CREATE_LAST_FIELD map_name
+#define BPF_MAP_CREATE_LAST_FIELD btf_value_type_id /* PATCH: was map_name */
 /* called via syscall */
 static int map_create(union bpf_attr *attr)
 {
@@ -988,7 +988,7 @@ struct bpf_prog *bpf_prog_get_type(u32 ufd, enum bpf_prog_type type)
 EXPORT_SYMBOL_GPL(bpf_prog_get_type);
 
 /* last field in 'union bpf_attr' used by this command */
-#define	BPF_PROG_LOAD_LAST_FIELD expected_attach_type
+#define	BPF_PROG_LOAD_LAST_FIELD line_info_cnt /* PATCH: was expected_attach_type */
 
 static int bpf_prog_load(union bpf_attr *attr)
 {
@@ -1555,6 +1555,124 @@ static int bpf_map_get_info_by_fd(struct bpf_map *map,
 	return 0;
 }
 
+/* ===================== PATCH: BTF minimal shim =====================
+ * This device's kernel (3.18) has no BTF support at all. Modern
+ * netbpfload/libbpf userspace unconditionally calls BPF_BTF_LOAD before
+ * loading any program/map that references BTF, and treats EINVAL on that
+ * call as fatal, aborting before it ever loads netd/tethering's real BPF
+ * programs (see: /sys/fs/bpf/netd_shared, /sys/fs/bpf/net_shared never
+ * getting created, and jniClatCoordinator/BandwidthController failing
+ * later at runtime for the same underlying reason).
+ *
+ * This is a deliberate shortcut, NOT a real BTF implementation:
+ *   - the BTF blob is copied into kernel memory and handed back an fd,
+ *     but its contents are never parsed or type-checked.
+ *   - BPF_MAP_CREATE / BPF_PROG_LOAD are updated (see LAST_FIELD changes
+ *     above) to accept btf_fd/prog_btf_fd/func_info/line_info without
+ *     validating them - maps and programs are created exactly as they
+ *     would be without BTF.
+ *   - No BTF-based verifier checks (global function calls via func_info,
+ *     line info for verifier logs, etc.) are performed. If a program
+ *     genuinely depends on BTF-verified global functions to pass the
+ *     verifier, it may still fail to load - that is a different, later
+ *     failure than the one this patch targets.
+ *
+ * Net effect: this exists purely to stop NetBpfLoad from bailing out at
+ * the first BPF_BTF_LOAD call. Expect this to reveal the *next* failure
+ * further down NetBpfLoad's object list - that is expected, not a sign
+ * this patch is wrong. Capture a fresh log after flashing this and look
+ * for the next EINVAL/lstat error, same as before.
+ */
+
+#define BPF_BTF_MAX_SIZE (16 * 1024 * 1024) /* generous sanity ceiling */
+
+struct bpf_btf_min {
+	atomic_t	refcnt;
+	u32		data_size;
+	u32		id;
+	void		*data;
+};
+
+static atomic_t bpf_btf_min_id_gen = ATOMIC_INIT(0);
+
+static int bpf_btf_min_release(struct inode *inode, struct file *filp)
+{
+	struct bpf_btf_min *btf = filp->private_data;
+
+	if (atomic_dec_and_test(&btf->refcnt)) {
+		kvfree(btf->data);
+		kfree(btf);
+	}
+	return 0;
+}
+
+static const struct file_operations bpf_btf_fops = {
+	.release	= bpf_btf_min_release,
+	.read		= bpf_dummy_read,
+	.write		= bpf_dummy_write,
+};
+
+#define BPF_BTF_LOAD_LAST_FIELD btf_log_level
+
+static int bpf_btf_load(union bpf_attr *attr)
+{
+	struct bpf_btf_min *btf;
+	void *data;
+	int fd;
+
+	if (CHECK_ATTR(BPF_BTF_LOAD))
+		return -EINVAL;
+
+	if (attr->btf_size == 0 || attr->btf_size > BPF_BTF_MAX_SIZE)
+		return -EINVAL;
+
+	/* kvzalloc() doesn't exist in this tree; vzalloc()/kvfree() do, and
+	 * kvfree() is explicitly documented to accept vmalloc'd pointers too.
+	 */
+	data = vzalloc(attr->btf_size);
+	if (!data)
+		return -ENOMEM;
+
+	if (copy_from_user(data, u64_to_ptr(attr->btf), attr->btf_size)) {
+		kvfree(data);
+		return -EFAULT;
+	}
+
+	/* Deliberately NOT parsed/validated - see comment block above. */
+
+	btf = kzalloc(sizeof(*btf), GFP_USER);
+	if (!btf) {
+		kvfree(data);
+		return -ENOMEM;
+	}
+	atomic_set(&btf->refcnt, 1);
+	btf->data = data;
+	btf->data_size = attr->btf_size;
+	btf->id = (u32)atomic_inc_return(&bpf_btf_min_id_gen);
+
+	/* No real log is produced; if the caller asked for one, hand back
+	 * an empty (zero-length) log rather than silently ignoring the
+	 * request, so a non-NULL/non-zero-size log_buf doesn't look stale.
+	 */
+	if (attr->btf_log_size && attr->btf_log_buf) {
+		char zero = 0;
+
+		if (put_user(zero, ((char __user *)u64_to_ptr(attr->btf_log_buf)))) {
+			kvfree(data);
+			kfree(btf);
+			return -EFAULT;
+		}
+	}
+
+	fd = anon_inode_getfd("bpf-btf", &bpf_btf_fops, btf, O_RDWR | O_CLOEXEC);
+	if (fd < 0) {
+		kvfree(data);
+		kfree(btf);
+	}
+	return fd;
+}
+/* =================== end PATCH: BTF minimal shim =================== */
+
 #define BPF_OBJ_GET_INFO_BY_FD_LAST_FIELD info.info
 
 static int bpf_obj_get_info_by_fd(const union bpf_attr *attr,
@@ -1577,7 +1695,41 @@ static int bpf_obj_get_info_by_fd(const union bpf_attr *attr,
 	else if (f.file->f_op == &bpf_map_fops)
 		err = bpf_map_get_info_by_fd(f.file->private_data, attr,
 					     uattr);
-	else
+	else if (f.file->f_op == &bpf_btf_fops) {
+		/* PATCH: BTF minimal shim - struct bpf_btf_info layout,
+		 * matches upstream (btf ptr, btf_size, id). We deliberately do
+		 * NOT write into the caller-supplied 'btf' data pointer here:
+		 * we never validated it, and the caller already has its own
+		 * copy of the blob it originally sent to BPF_BTF_LOAD, so there
+		 * is nothing useful to copy back. We only report size/id.
+		 */
+		struct bpf_btf_min *btf = f.file->private_data;
+		struct {
+			__aligned_u64 btf;
+			__u32 btf_size;
+			__u32 id;
+		} info = {};
+		u32 uinfo_len = attr->info.info_len;
+		u32 copy_len = min_t(u32, sizeof(info), uinfo_len);
+		void __user *uinfo = u64_to_ptr(attr->info.info);
+
+		/* Read the caller's struct first (for forward/backward struct
+		 * size compatibility), then only overwrite the fields we
+		 * actually know about. 'btf' (the data pointer field) is left
+		 * exactly as the caller sent it - untouched, unused.
+		 */
+		if (copy_len && copy_from_user(&info, uinfo, copy_len)) {
+			err = -EFAULT;
+		} else {
+			info.btf_size = btf->data_size;
+			info.id = btf->id;
+			if (copy_to_user(uinfo, &info, copy_len) ||
+			    put_user(sizeof(info), &uattr->info.info_len))
+				err = -EFAULT;
+			else
+				err = 0;
+		}
+	} else
 		err = -EINVAL;
 
 	fdput(f);
@@ -1670,6 +1822,9 @@ SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, siz
 		break;
 	case BPF_OBJ_GET_INFO_BY_FD:
 		err = bpf_obj_get_info_by_fd(&attr, uattr);
+		break;
+	case BPF_BTF_LOAD: /* PATCH: BTF minimal shim */
+		err = bpf_btf_load(&attr);
 		break;
 	default:
 		err = -EINVAL;

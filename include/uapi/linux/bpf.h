@@ -93,6 +93,11 @@ enum bpf_cmd {
 	BPF_MAP_GET_FD_BY_ID,
 	BPF_OBJ_GET_INFO_BY_FD,
 	BPF_PROG_QUERY,
+	/* PATCH (BTF minimal shim): explicit value to match the ABI number
+	 * the prebuilt userspace (libbpf/netbpfload) already expects, since
+	 * this kernel is missing BPF_RAW_TRACEPOINT_OPEN (=17) in between.
+	 */
+	BPF_BTF_LOAD = 18,
 };
 
 enum bpf_map_type {
@@ -235,6 +240,14 @@ union bpf_attr {
  					 * BPF_F_NUMA_NODE is set).
  					 */
 		char	map_name[BPF_OBJ_NAME_LEN];
+		/* PATCH (BTF minimal shim): fields added so CHECK_ATTR() doesn't
+		 * reject a modern userspace BPF_MAP_CREATE call. The kernel does
+		 * NOT validate or use these - it just accepts and ignores them.
+		 */
+		__u32	map_ifindex;
+		__u32	btf_fd;
+		__u32	btf_key_type_id;
+		__u32	btf_value_type_id;
 	};
 
 	struct { /* anonymous struct used by BPF_MAP_*_ELEM commands */
@@ -264,6 +277,18 @@ union bpf_attr {
 		 * (context accesses, allowed helpers, etc).
 		 */
 		__u32		expected_attach_type;
+		/* PATCH (BTF minimal shim): fields added so CHECK_ATTR() doesn't
+		 * reject a modern userspace BPF_PROG_LOAD call. The kernel does
+		 * NOT validate or use func_info/line_info - it just accepts and
+		 * ignores them (no BTF-based verifier checks are performed).
+		 */
+		__u32		prog_btf_fd;
+		__u32		func_info_rec_size;
+		__aligned_u64	func_info;
+		__u32		func_info_cnt;
+		__u32		line_info_rec_size;
+		__aligned_u64	line_info;
+		__u32		line_info_cnt;
 	};
 
 	struct { /* anonymous struct used by BPF_OBJ_* commands */
@@ -304,6 +329,18 @@ union bpf_attr {
 		__u32		info_len;
 		__aligned_u64	info;
 	} info;
+
+	struct { /* PATCH (BTF minimal shim): anonymous struct used by
+		   * BPF_BTF_LOAD command. Mirrors upstream layout; btf_log_buf/
+		   * btf_log_size are accepted but never written to (no real
+		   * verifier log is produced by this shim).
+		   */
+		__aligned_u64	btf;
+		__aligned_u64	btf_log_buf;
+		__u32		btf_size;
+		__u32		btf_log_size;
+		__u32		btf_log_level;
+	};
 
 	struct { /* anonymous struct used by BPF_PROG_QUERY command */
 		__u32		target_fd;	/* container object to query */

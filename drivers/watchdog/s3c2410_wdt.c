@@ -346,6 +346,26 @@ static int s3c2410wdt_start(struct watchdog_device *wdd)
 	return 0;
 }
 
+/*
+ * Userspace start (/dev/watchdog, WDIOS_ENABLECARD) never arms the SoC reset.
+ *
+ * The Samsung init "softdog" (One UI 9 / Android 17) arms the watchdog from userspace, but its
+ * keepalive ioctl fails on this kernel ("Failed to ioctl to /dev/watchdog:
+ * Invalid argument"), so nothing feeds it and the SoC hard-resets ~30s later.
+ * Keep the hardware stopped instead. The panic/emergency paths call
+ * s3c2410wdt_start() and s3c2410wdt_set_emergency_reset() directly and are
+ * not affected.
+ */
+static int s3c2410wdt_start_user(struct watchdog_device *wdd)
+{
+	struct s3c2410_wdt *wdt = watchdog_get_drvdata(wdd);
+
+	pr_info("s3c2410wdt: userspace start ignored (WTCON=%08x)\n",
+		readl(wdt->reg_base + S3C2410_WTCON));
+
+	return s3c2410wdt_stop(wdd);
+}
+
 static inline int s3c2410wdt_is_running(struct s3c2410_wdt *wdt)
 {
 	return readl(wdt->reg_base + S3C2410_WTCON) & S3C2410_WTCON_ENABLE;
@@ -428,7 +448,7 @@ static const struct watchdog_info s3c2410_wdt_ident = {
 
 static struct watchdog_ops s3c2410wdt_ops = {
 	.owner = THIS_MODULE,
-	.start = s3c2410wdt_start,
+	.start = s3c2410wdt_start_user,
 	.stop = s3c2410wdt_stop,
 	.ping = s3c2410wdt_keepalive,
 	.set_timeout = s3c2410wdt_set_heartbeat,

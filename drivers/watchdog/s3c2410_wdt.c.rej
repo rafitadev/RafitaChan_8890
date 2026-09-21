@@ -1,0 +1,11 @@
+--- drivers/watchdog/s3c2410_wdt.c
++++ drivers/watchdog/s3c2410_wdt.c
+@@ -442,7 +456,7 @@
+ 
+ static struct watchdog_ops s3c2410wdt_ops = {
+ 	.owner = THIS_MODULE,
+-	.start = s3c2410wdt_start,
++	.start = s3c2410wdt_start_user,
+ 	.stop = s3c2410wdt_stop,
+ 	.ping = s3c2410wdt_keepalive,
+ 	.set_timeout = s3c2410wdt_set_heartbeat,

@@ -1988,6 +1988,33 @@ out:
 	return ret;
 }
 
+/*
+ * Newer Android (libprocessgroup) mounts cgroup2 with options that only
+ * exist on newer kernels (memory_recursiveprot, nsdelegate). This kernel
+ * has no use for them, but rejecting them makes SetupCgroups() fail and
+ * init reboots with "bootstrap-apexd-failed". Accept and ignore them.
+ */
+static bool cgroup2_opts_ignorable(const char *data)
+{
+	const char *p = data;
+
+	while (p && *p) {
+		size_t len = strcspn(p, ",");
+
+		if (len &&
+		    !(len == sizeof("memory_recursiveprot") - 1 &&
+		      !strncmp(p, "memory_recursiveprot", len)) &&
+		    !(len == sizeof("nsdelegate") - 1 &&
+		      !strncmp(p, "nsdelegate", len)))
+			return false;
+
+		p += len;
+		if (*p == ',')
+			p++;
+	}
+	return true;
+}
+
 static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 			 int flags, const char *unused_dev_name,
 			 void *data)
@@ -2019,7 +2046,7 @@ static struct dentry *cgroup_mount(struct file_system_type *fs_type,
 		cgroup_enable_task_cg_lists();
 
 	if (is_v2) {
-		if (data) {
+		if (data && !cgroup2_opts_ignorable(data)) {
 			pr_err("cgroup2: unknown option \"%s\"\n", (char *)data);
 			put_cgroup_ns(ns);
 			return ERR_PTR(-EINVAL);
