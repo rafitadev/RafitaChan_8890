@@ -240,7 +240,7 @@ static const char *const bpf_class_string[] = {
 	[BPF_STX]   = "stx",
 	[BPF_ALU]   = "alu",
 	[BPF_JMP]   = "jmp",
-	[BPF_RET]   = "BUG",
+	[BPF_JMP32] = "jmp32",
 	[BPF_ALU64] = "alu64",
 };
 
@@ -363,10 +363,11 @@ static void print_bpf_insn(const struct bpf_verifier_env *env,
 			verbose("BUG_ld_%02x\n", insn->code);
 			return;
 		}
-	} else if (class == BPF_JMP) {
+	} else if (class == BPF_JMP || class == BPF_JMP32) {
 		u8 opcode = BPF_OP(insn->code);
+		const char rc = class == BPF_JMP32 ? 'w' : 'r';
 
-		if (opcode == BPF_CALL) {
+		if (class == BPF_JMP && opcode == BPF_CALL) {
 			verbose("(%02x) call %d\n", insn->code, insn->imm);
 		} else if (insn->code == (BPF_JMP | BPF_JA)) {
 			verbose("(%02x) goto pc%+d\n",
@@ -374,13 +375,13 @@ static void print_bpf_insn(const struct bpf_verifier_env *env,
 		} else if (insn->code == (BPF_JMP | BPF_EXIT)) {
 			verbose("(%02x) exit\n", insn->code);
 		} else if (BPF_SRC(insn->code) == BPF_X) {
-			verbose("(%02x) if r%d %s r%d goto pc%+d\n",
-				insn->code, insn->dst_reg,
+			verbose("(%02x) if %c%d %s %c%d goto pc%+d\n",
+				insn->code, rc, insn->dst_reg,
 				bpf_jmp_string[BPF_OP(insn->code) >> 4],
-				insn->src_reg, insn->off);
+				rc, insn->src_reg, insn->off);
 		} else {
-			verbose("(%02x) if r%d %s 0x%x goto pc%+d\n",
-				insn->code, insn->dst_reg,
+			verbose("(%02x) if %c%d %s 0x%x goto pc%+d\n",
+				insn->code, rc, insn->dst_reg,
 				bpf_jmp_string[BPF_OP(insn->code) >> 4],
 				insn->imm, insn->off);
 		}
@@ -2392,6 +2393,14 @@ static int check_cond_jmp_op(struct bpf_verifier_env *env,
 	struct bpf_verifier_state *other_branch, *this_branch = &env->cur_state;
 	struct bpf_reg_state *regs = this_branch->regs, *dst_reg;
 	u8 opcode = BPF_OP(insn->code);
+	/* BPF_JMP32 compares only the low 32 bits. This verifier tracks 64-bit
+	 * register values, so for JMP32 it deliberately does NOT: fold the
+	 * branch, refine min/max bounds, prove a map pointer non-NULL, or
+	 * derive packet-range information. Both paths are always explored with
+	 * unmodified register state, which is conservative (it can only make
+	 * the verifier reject more programs, never accept an unsafe one).
+	 */
+	const bool is_jmp32 = BPF_CLASS(insn->code) == BPF_JMP32;
 	int err;
 
 	if (opcode > BPF_EXIT) {
@@ -2430,7 +2439,7 @@ static int check_cond_jmp_op(struct bpf_verifier_env *env,
 	dst_reg = &regs[insn->dst_reg];
 
 	/* detect if R == 0 where R was initialized to zero earlier */
-	if (BPF_SRC(insn->code) == BPF_K &&
+	if (!is_jmp32 && BPF_SRC(insn->code) == BPF_K &&
 	    (opcode == BPF_JEQ || opcode == BPF_JNE) &&
 	    dst_reg->type == CONST_IMM && dst_reg->imm == insn->imm) {
 		if (opcode == BPF_JEQ) {
@@ -2455,7 +2464,9 @@ static int check_cond_jmp_op(struct bpf_verifier_env *env,
 	/* detect if we are comparing against a constant value so we can adjust
 	 * our min/max values for our dst register.
 	 */
-	if (BPF_SRC(insn->code) == BPF_X) {
+	if (is_jmp32) {
+		/* no bounds refinement for 32-bit comparisons, see above */
+	} else if (BPF_SRC(insn->code) == BPF_X) {
 		if (regs[insn->src_reg].type == CONST_IMM)
 			reg_set_min_max(&other_branch->regs[insn->dst_reg],
 					dst_reg, regs[insn->src_reg].imm,
@@ -2470,7 +2481,7 @@ static int check_cond_jmp_op(struct bpf_verifier_env *env,
 	}
 
 	/* detect if R == 0 where R is returned from bpf_map_lookup_elem() */
-	if (BPF_SRC(insn->code) == BPF_K &&
+	if (!is_jmp32 && BPF_SRC(insn->code) == BPF_K &&
 	    insn->imm == 0 && (opcode == BPF_JEQ || opcode == BPF_JNE) &&
 	    dst_reg->type == PTR_TO_MAP_VALUE_OR_NULL) {
 		/* Mark all identical map registers in each branch as either
@@ -2480,12 +2491,12 @@ static int check_cond_jmp_op(struct bpf_verifier_env *env,
 			      opcode == BPF_JEQ ? PTR_TO_MAP_VALUE : UNKNOWN_VALUE);
 		mark_map_regs(other_branch, insn->dst_reg,
 			      opcode == BPF_JEQ ? UNKNOWN_VALUE : PTR_TO_MAP_VALUE);
-	} else if (BPF_SRC(insn->code) == BPF_X && opcode == BPF_JGT &&
-		   dst_reg->type == PTR_TO_PACKET &&
+	} else if (!is_jmp32 && BPF_SRC(insn->code) == BPF_X &&
+		   opcode == BPF_JGT && dst_reg->type == PTR_TO_PACKET &&
 		   regs[insn->src_reg].type == PTR_TO_PACKET_END) {
 		find_good_pkt_pointers(this_branch, dst_reg);
-	} else if (BPF_SRC(insn->code) == BPF_X && opcode == BPF_JGE &&
-		   dst_reg->type == PTR_TO_PACKET_END &&
+	} else if (!is_jmp32 && BPF_SRC(insn->code) == BPF_X &&
+		   opcode == BPF_JGE && dst_reg->type == PTR_TO_PACKET_END &&
 		   regs[insn->src_reg].type == PTR_TO_PACKET) {
 		find_good_pkt_pointers(other_branch, &regs[insn->src_reg]);
 	} else if (is_pointer_value(env, insn->dst_reg)) {
@@ -2741,8 +2752,17 @@ peek_stack:
 		goto check_state;
 	t = insn_stack[cur_stack - 1];
 
-	if (BPF_CLASS(insns[t].code) == BPF_JMP) {
+	if (BPF_CLASS(insns[t].code) == BPF_JMP ||
+	    BPF_CLASS(insns[t].code) == BPF_JMP32) {
 		u8 opcode = BPF_OP(insns[t].code);
+
+		/* JMP32 only has conditional jumps */
+		if (BPF_CLASS(insns[t].code) == BPF_JMP32 &&
+		    (opcode == BPF_JA || opcode == BPF_CALL ||
+		     opcode == BPF_EXIT)) {
+			ret = -EINVAL;
+			goto err_free;
+		}
 
 		if (opcode == BPF_EXIT) {
 			goto mark_explored;
@@ -3310,6 +3330,18 @@ process_bpf_exit:
 				if (err)
 					return err;
 			}
+		} else if (class == BPF_JMP32) {
+			u8 opcode = BPF_OP(insn->code);
+
+			if (opcode == BPF_JA || opcode == BPF_CALL ||
+			    opcode == BPF_EXIT) {
+				verbose("invalid BPF_JMP32 opcode %x\n", opcode);
+				return -EINVAL;
+			}
+
+			err = check_cond_jmp_op(env, insn, &insn_idx);
+			if (err)
+				return err;
 		} else if (class == BPF_LD) {
 			u8 mode = BPF_MODE(insn->code);
 

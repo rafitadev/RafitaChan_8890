@@ -54,17 +54,32 @@ do código-fonte. **Nada aqui foi compilado nem testado em hardware.**
 
 Custo conhecido: um `push/pop` extra por programa JITado (sempre salva `x23/x24`).
 
+### Etapa 3 (branch `rafitachan-bpf-6.6-backport`): `BPF_JMP32` e saltos do JIT
+
+| Arquivo | Mudança |
+|---|---|
+| `include/uapi/linux/bpf.h` | Classe `BPF_JMP32` (0x06). Só existe em eBPF; no classic BPF 0x06 continua sendo `BPF_RET` e nunca chega ao verificador eBPF. |
+| `include/linux/filter.h` | Macros `BPF_JMP32_REG` e `BPF_JMP32_IMM`. |
+| `kernel/bpf/core.c` | Interpretador: 22 handlers `JMP32_*` (comparam só os 32 bits baixos; os signed usam `s32`). `bpf_is_jmp_and_has_target()` reconhece JMP32, para o ajuste de offsets em patches. Blinding de constantes também cobre `JMP32 \| K`. |
+| `kernel/bpf/verifier.c` | Aceita JMP32 em `do_check`, `check_cfg` e `check_cond_jmp_op`; rejeita `JA/CALL/EXIT` na classe JMP32. **Abordagem conservadora**: para JMP32 não há desvio estático, refinamento de limites, prova de ponteiro não-NULL nem inferência de pacote; os dois caminhos são sempre explorados com o estado intacto. Isso só pode rejeitar mais programas, nunca aceitar um inseguro. |
+| `arch/arm64/net/bpf_jit_comp.c` | JMP32 em registradores `w`. Além disso, corrigidos dois buracos antigos do JIT: faltavam `JLT/JLE/JSLT/JSLE` e `JSET` (caía em `-EFAULT`); esses programas iam para o interpretador. |
+| `arch/arm64/net/bpf_jit.h` | Condições `A64_COND_CC/LS/LT/LE`. |
+
+Efeito prático: programas gerados por clang moderno (que usam `JLT/JLE/JSLT/JSLE`)
+agora podem ser JITados no ARM64 em vez de cair no interpretador.
+
 ## 4. O que NÃO está implementado (limitações honestas)
 
 - **BTF real**: o tipo de cada entrada não é interpretado. O shim existe só
   para o `NetBpfLoad` não abortar. Programas que dependem de verificação por BTF
   (funções globais, `func_info`) podem falhar no verificador.
 - **DEVMAP_HASH real**: sem `bpf_redirect_map` nele; é só um hash u32→u32.
-- **Verificador**: faltam `BPF_JMP32`, chamadas bpf-to-bpf (`BPF_PSEUDO_CALL`) e
-  a mitigação de Spectre v4 (`sanitize_ptr_alu`). Programas compilados para
-  clang `-mcpu=v3` ou que usem subprogramas serão rejeitados.
+- **Verificador**: faltam chamadas bpf-to-bpf (`BPF_PSEUDO_CALL`), a mitigação de
+  Spectre v4 (`sanitize_ptr_alu`) e rastreamento de limites de 32 bits (`tnum`/
+  `subreg`). O JMP32 existe, mas sem refinamento de limites: um programa que
+  dependa de um `if (w1 < N)` para provar um acesso válido será rejeitado.
 - **JIT ARM64**: tail call e blinding foram escritos **sem compilar nem testar**;
-  sem BPF-to-BPF calls, sem `BPF_JMP32`. O limite de pilha por tail call
+  sem BPF-to-BPF calls. O limite de pilha por tail call
   encadeado é o mesmo do interpretador (`MAX_TAIL_CALL_CNT`).
 - Sem `BPF_MAP_TYPE_RINGBUF`, `BPF_F_MMAPABLE`, `clsact`, `BPF_PROG_TEST_RUN`.
   O loader do Android pula programas cujo `min_kver` é maior que o do kernel.
