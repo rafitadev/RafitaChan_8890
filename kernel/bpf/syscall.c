@@ -1612,6 +1612,68 @@ static const struct file_operations bpf_btf_fops = {
 	.write		= bpf_dummy_write,
 };
 
+/* RafitaChan: structural validation of the BTF blob header.
+ *
+ * Mirrors the header rules enforced by the upstream 4.19 BTF loader
+ * (magic, version, flags, section bounds/ordering/alignment, string
+ * section NUL framing). The type section is still NOT parsed: this is a
+ * sanity filter so that garbage is rejected with -EINVAL instead of being
+ * accepted and handed back as a valid fd.
+ */
+#define BPF_BTF_MAGIC		0xeB9F
+#define BPF_BTF_VERSION		1
+#define BPF_BTF_HDR_MIN_LEN	24
+
+struct bpf_btf_hdr_min {
+	__u16	magic;
+	__u8	version;
+	__u8	flags;
+	__u32	hdr_len;
+	__u32	type_off;
+	__u32	type_len;
+	__u32	str_off;
+	__u32	str_len;
+};
+
+static int bpf_btf_check_hdr(const void *data, u32 size)
+{
+	const struct bpf_btf_hdr_min *hdr = data;
+	const u8 *meta;
+	u32 meta_len;
+
+	if (size < BPF_BTF_HDR_MIN_LEN)
+		return -EINVAL;
+	if (hdr->magic != BPF_BTF_MAGIC || hdr->version != BPF_BTF_VERSION)
+		return -EINVAL;
+	if (hdr->flags)
+		return -EINVAL;
+	if (hdr->hdr_len < BPF_BTF_HDR_MIN_LEN || hdr->hdr_len >= size)
+		return -EINVAL;
+
+	meta = (const u8 *)data + hdr->hdr_len;
+	meta_len = size - hdr->hdr_len;
+
+	/* Offsets are relative to the end of the header. Each check is
+	 * written as len <= meta_len - off so that it cannot overflow.
+	 */
+	if (hdr->type_off > meta_len || hdr->type_len > meta_len - hdr->type_off)
+		return -EINVAL;
+	if (hdr->str_off > meta_len || hdr->str_len > meta_len - hdr->str_off)
+		return -EINVAL;
+	if (hdr->type_off & (sizeof(u32) - 1))
+		return -EINVAL;
+	/* type section must come before the string section, no overlap */
+	if (hdr->type_off + hdr->type_len > hdr->str_off)
+		return -EINVAL;
+	/* string section: non-empty, starts and ends with NUL */
+	if (!hdr->str_len)
+		return -EINVAL;
+	if (meta[hdr->str_off] != 0 || meta[hdr->str_off + hdr->str_len - 1] != 0)
+		return -EINVAL;
+
+	return 0;
+}
+
 #define BPF_BTF_LOAD_LAST_FIELD btf_log_level
 
 static int bpf_btf_load(union bpf_attr *attr)
@@ -1622,6 +1684,13 @@ static int bpf_btf_load(union bpf_attr *attr)
 
 	if (CHECK_ATTR(BPF_BTF_LOAD))
 		return -EINVAL;
+
+	/* Upstream requires CAP_SYS_ADMIN for BTF load; this also stops
+	 * unprivileged callers from pinning up to 16 MB of vmalloc memory
+	 * per call (that memory is not charged to the memlock rlimit).
+	 */
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
 
 	if (attr->btf_size == 0 || attr->btf_size > BPF_BTF_MAX_SIZE)
 		return -EINVAL;
@@ -1638,7 +1707,13 @@ static int bpf_btf_load(union bpf_attr *attr)
 		return -EFAULT;
 	}
 
-	/* Deliberately NOT parsed/validated - see comment block above. */
+	/* Only the header is sanity-checked (see bpf_btf_check_hdr). The
+	 * type section is deliberately NOT parsed - see comment block above.
+	 */
+	if (bpf_btf_check_hdr(data, attr->btf_size)) {
+		kvfree(data);
+		return -EINVAL;
+	}
 
 	btf = kzalloc(sizeof(*btf), GFP_USER);
 	if (!btf) {

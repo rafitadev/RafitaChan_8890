@@ -86,7 +86,7 @@ enum bpf_cmd {
 	BPF_OBJ_GET,
 	BPF_PROG_ATTACH,
 	BPF_PROG_DETACH,
-	BPF_PROG_TEST_RUN, // stub
+	BPF_PROG_TEST_RUN, /* number reserved for ABI; NOT implemented here, bpf() returns -EINVAL */
 	BPF_PROG_GET_NEXT_ID,
 	BPF_MAP_GET_NEXT_ID,
 	BPF_PROG_GET_FD_BY_ID,

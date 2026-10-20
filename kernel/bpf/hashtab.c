@@ -1294,9 +1294,36 @@ static struct bpf_map_type_list htab_of_map_type __read_mostly = {
 	.type = BPF_MAP_TYPE_HASH_OF_MAPS,
 };
 
-static struct bpf_map_type_list devmap_hash_stub_type __read_mostly = {
-        .ops = &htab_ops,
-        .type = BPF_MAP_TYPE_DEVMAP_HASH,
+/* BPF_MAP_TYPE_DEVMAP_HASH (RafitaChan compatibility type).
+ *
+ * This kernel has no real devmap-hash: there is no XDP redirect_map support
+ * for it and the verifier does not accept it for bpf_redirect_map(). What
+ * userspace (e.g. the Android BPF loader) needs is the map to be creatable
+ * and usable through the bpf() syscall with the upstream ABI, so it is backed
+ * by the generic hash table. Enforce the one ABI constraint upstream imposes
+ * on this type (u32 key, u32 value) so that it cannot be used as a general
+ * purpose hash under a different name.
+ */
+static struct bpf_map *devmap_hash_compat_alloc(union bpf_attr *attr)
+{
+	if (attr->key_size != sizeof(u32) || attr->value_size != sizeof(u32))
+		return ERR_PTR(-EINVAL);
+
+	return htab_map_alloc(attr);
+}
+
+static const struct bpf_map_ops devmap_hash_compat_ops = {
+	.map_alloc = devmap_hash_compat_alloc,
+	.map_free = htab_map_free,
+	.map_get_next_key = htab_map_get_next_key,
+	.map_lookup_elem = htab_map_lookup_elem,
+	.map_update_elem = htab_map_update_elem,
+	.map_delete_elem = htab_map_delete_elem,
+};
+
+static struct bpf_map_type_list devmap_hash_compat_type __read_mostly = {
+	.ops = &devmap_hash_compat_ops,
+	.type = BPF_MAP_TYPE_DEVMAP_HASH,
 };
 
 static int __init register_htab_map(void)
@@ -1306,7 +1333,7 @@ static int __init register_htab_map(void)
 	bpf_register_map_type(&htab_lru_type);
 	bpf_register_map_type(&htab_lru_percpu_type);
 	bpf_register_map_type(&htab_of_map_type);
-	bpf_register_map_type(&devmap_hash_stub_type);
+	bpf_register_map_type(&devmap_hash_compat_type);
 
 	return 0;
 }
