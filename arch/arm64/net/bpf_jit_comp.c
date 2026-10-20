@@ -18,6 +18,7 @@
 
 #define pr_fmt(fmt) "bpf_jit: " fmt
 
+#include <linux/bpf.h>
 #include <linux/filter.h>
 #include <linux/printk.h>
 #include <linux/skbuff.h>
@@ -29,8 +30,12 @@
 
 #include "bpf_jit.h"
 
-#define TMP_REG_1 (MAX_BPF_REG + 0)
-#define TMP_REG_2 (MAX_BPF_REG + 1)
+/* BPF_REG_AX == MAX_BPF_REG (constant blinding), so the JIT-private
+ * registers must start at MAX_BPF_JIT_REG to avoid aliasing it.
+ */
+#define TMP_REG_1 (MAX_BPF_JIT_REG + 0)
+#define TMP_REG_2 (MAX_BPF_JIT_REG + 1)
+#define TCALL_CNT (MAX_BPF_JIT_REG + 2)
 
 /* Map BPF registers to A64 registers */
 static const int bpf2a64[] = {
@@ -52,6 +57,10 @@ static const int bpf2a64[] = {
 	/* temporary register for internal BPF JIT */
 	[TMP_REG_1] = A64_R(23),
 	[TMP_REG_2] = A64_R(24),
+	/* tail_call_cnt: x26 was already saved/restored in the frame */
+	[TCALL_CNT] = A64_R(26),
+	/* temporary register for blinding constants (caller-saved scratch) */
+	[BPF_REG_AX] = A64_R(9),
 };
 
 struct jit_ctx {
@@ -143,8 +152,18 @@ static inline int epilogue_offset(const struct jit_ctx *ctx)
 
 #define STACK_SIZE STACK_ALIGN(_STACK_SIZE)
 
-static void build_prologue(struct jit_ctx *ctx)
+/* Number of A64 instructions emitted by build_prologue() before the
+ * "set up function call stack" step. A tail call jumps to
+ * bpf_func + PROLOGUE_OFFSET so that the frame (callee-saved registers and
+ * tail_call_cnt) is shared. Because of that, every JITed program MUST use
+ * exactly the same frame layout: no conditional pushes in the prologue.
+ */
+#define PROLOGUE_OFFSET 8
+
+static int build_prologue(struct jit_ctx *ctx)
 {
+	const int idx0 = ctx->idx;
+	const u8 tcc = bpf2a64[TCALL_CNT];
 	const u8 r6 = bpf2a64[BPF_REG_6];
 	const u8 r7 = bpf2a64[BPF_REG_7];
 	const u8 r8 = bpf2a64[BPF_REG_8];
@@ -185,21 +204,36 @@ static void build_prologue(struct jit_ctx *ctx)
 	/* Save callee-saved register */
 	emit(A64_PUSH(r6, r7, A64_SP), ctx);
 	emit(A64_PUSH(r8, r9, A64_SP), ctx);
-	if (ctx->tmp_used)
-		emit(A64_PUSH(tmp1, tmp2, A64_SP), ctx);
+	/* Always saved (see PROLOGUE_OFFSET): frame layout must not depend
+	 * on the program being JITed.
+	 */
+	emit(A64_PUSH(tmp1, tmp2, A64_SP), ctx);
 
-	/* Save fp (x25) and x26. SP requires 16 bytes alignment */
-	emit(A64_PUSH(fp, A64_R(26), A64_SP), ctx);
+	/* Save fp (x25) and tail_call_cnt (x26). SP requires 16 bytes
+	 * alignment
+	 */
+	emit(A64_PUSH(fp, tcc, A64_SP), ctx);
 
 	/* Set up BPF prog stack base register (x25) */
 	emit(A64_MOV(1, fp, A64_SP), ctx);
 
+	/* Initialize tail_call_cnt */
+	emit(A64_MOVZ(1, tcc, 0, 0), ctx);
+
+	if (ctx->idx - idx0 != PROLOGUE_OFFSET) {
+		pr_err_once("unexpected prologue size %d, expected %d\n",
+			    ctx->idx - idx0, PROLOGUE_OFFSET);
+		return -EFAULT;
+	}
+
 	/* Set up function call stack */
 	emit(A64_SUB_I(1, A64_SP, A64_SP, STACK_SIZE), ctx);
+	return 0;
 }
 
 static void build_epilogue(struct jit_ctx *ctx)
 {
+	const u8 tcc = bpf2a64[TCALL_CNT];
 	const u8 r0 = bpf2a64[BPF_REG_0];
 	const u8 r6 = bpf2a64[BPF_REG_6];
 	const u8 r7 = bpf2a64[BPF_REG_7];
@@ -212,12 +246,11 @@ static void build_epilogue(struct jit_ctx *ctx)
 	/* We're done with BPF stack */
 	emit(A64_ADD_I(1, A64_SP, A64_SP, STACK_SIZE), ctx);
 
-	/* Restore fs (x25) and x26 */
-	emit(A64_POP(fp, A64_R(26), A64_SP), ctx);
+	/* Restore fp (x25) and tail_call_cnt (x26) */
+	emit(A64_POP(fp, tcc, A64_SP), ctx);
 
 	/* Restore callee-saved register */
-	if (ctx->tmp_used)
-		emit(A64_POP(tmp1, tmp2, A64_SP), ctx);
+	emit(A64_POP(tmp1, tmp2, A64_SP), ctx);
 	emit(A64_POP(r8, r9, A64_SP), ctx);
 	emit(A64_POP(r6, r7, A64_SP), ctx);
 
@@ -228,6 +261,79 @@ static void build_epilogue(struct jit_ctx *ctx)
 	emit(A64_MOV(1, A64_R(0), r0), ctx);
 
 	emit(A64_RET(A64_LR), ctx);
+}
+
+/* Number of A64 instructions emitted by emit_bpf_tail_call(). Fixed, so the
+ * forward branches to "out" can be computed without a second pass.
+ */
+#define TAIL_CALL_INSNS 19
+
+/* bpf_tail_call(void *ctx, struct bpf_array *array, u64 index)
+ *
+ * Mirrors the interpreter (JMP_TAIL_CALL in kernel/bpf/core.c):
+ *	index = (u32)r3;
+ *	if (index >= array->map.max_entries) goto out;
+ *	if (tail_call_cnt > MAX_TAIL_CALL_CNT) goto out;
+ *	tail_call_cnt++;
+ *	prog = array->ptrs[index];
+ *	if (prog == NULL) goto out;
+ *	goto *(prog->bpf_func + PROLOGUE_OFFSET);
+ *
+ * R1 (x0, the context) is left untouched. SP is rewound by STACK_SIZE
+ * because the target's code starts at its own "set up function call stack"
+ * step, which subtracts STACK_SIZE again. The frame (callee-saved registers,
+ * x25 and tail_call_cnt) is shared with the program that was entered from
+ * the kernel, whose epilogue returns to the original caller.
+ */
+static int emit_bpf_tail_call(struct jit_ctx *ctx)
+{
+	const u8 r2 = bpf2a64[BPF_REG_2];
+	const u8 r3 = bpf2a64[BPF_REG_3];
+	const u8 tmp = bpf2a64[TMP_REG_1];
+	const u8 prg = bpf2a64[TMP_REG_2];
+	const u8 tcc = bpf2a64[TCALL_CNT];
+	const int idx0 = ctx->idx;
+#define tc_cur_offset	(ctx->idx - idx0)
+#define tc_jmp_offset	(TAIL_CALL_INSNS - tc_cur_offset)
+
+	/* index = (u32)r3: clear the upper 32 bits (w-register write) */
+	emit(A64_MOV(0, prg, r3), ctx);
+
+	/* if (index >= array->map.max_entries) goto out; (unsigned) */
+	emit_a64_mov_i64(tmp, offsetof(struct bpf_array, map.max_entries), ctx);
+	emit(A64_LDR32(tmp, r2, tmp), ctx);
+	emit(A64_CMP(1, prg, tmp), ctx);
+	emit(A64_B_(A64_COND_CS, tc_jmp_offset), ctx);
+
+	/* if (tail_call_cnt > MAX_TAIL_CALL_CNT) goto out; tail_call_cnt++; */
+	emit_a64_mov_i64(tmp, MAX_TAIL_CALL_CNT, ctx);
+	emit(A64_CMP(1, tcc, tmp), ctx);
+	emit(A64_B_(A64_COND_HI, tc_jmp_offset), ctx);
+	emit(A64_ADD_I(1, tcc, tcc, 1), ctx);
+
+	/* prog = array->ptrs[index]; if (prog == NULL) goto out; */
+	emit_a64_mov_i64(tmp, offsetof(struct bpf_array, ptrs), ctx);
+	emit(A64_ADD(1, tmp, r2, tmp), ctx);
+	emit(A64_LSL(1, prg, prg, 3), ctx);
+	emit(A64_LDR64(prg, tmp, prg), ctx);
+	emit(A64_CBZ(1, prg, tc_jmp_offset), ctx);
+
+	/* goto *(prog->bpf_func + PROLOGUE_OFFSET); */
+	emit_a64_mov_i64(tmp, offsetof(struct bpf_prog, bpf_func), ctx);
+	emit(A64_LDR64(tmp, prg, tmp), ctx);
+	emit(A64_ADD_I(1, tmp, tmp, sizeof(u32) * PROLOGUE_OFFSET), ctx);
+	emit(A64_ADD_I(1, A64_SP, A64_SP, STACK_SIZE), ctx);
+	emit(A64_BR(tmp), ctx);
+
+	/* out: */
+	if (tc_cur_offset != TAIL_CALL_INSNS) {
+		pr_err_once("tail call emitted %d insns, expected %d\n",
+			    tc_cur_offset, TAIL_CALL_INSNS);
+		return -EFAULT;
+	}
+	return 0;
+#undef tc_cur_offset
+#undef tc_jmp_offset
 }
 
 /* JITs an eBPF instruction.
@@ -522,6 +628,12 @@ emit_cond_jmp:
 		emit(A64_POP(A64_FP, A64_LR, A64_SP), ctx);
 		break;
 	}
+	/* tail call */
+	case BPF_JMP | BPF_TAIL_CALL:
+		ctx->tmp_used = 1;
+		if (emit_bpf_tail_call(ctx))
+			return -EFAULT;
+		break;
 	/* function return */
 	case BPF_JMP | BPF_EXIT:
 		/* Optimization: when last instruction is EXIT,
@@ -742,28 +854,48 @@ static inline void bpf_flush_icache(void *start, void *end)
 
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 {
+	struct bpf_prog *tmp, *orig_prog = prog;
 	struct bpf_binary_header *header;
+	bool tmp_blinded = false;
 	struct jit_ctx ctx;
 	int image_size;
 	u8 *image_ptr;
 
 	if (!bpf_jit_enable)
-		return prog;
+		return orig_prog;
+
+	/* Constant blinding (net.core.bpf_jit_harden). If blinding was
+	 * requested and failed, fall back to the interpreter.
+	 */
+	tmp = bpf_jit_blind_constants(prog);
+	if (IS_ERR(tmp))
+		return orig_prog;
+	if (tmp != prog) {
+		tmp_blinded = true;
+		prog = tmp;
+	}
 
 	memset(&ctx, 0, sizeof(ctx));
 	ctx.prog = prog;
 
 	ctx.offset = kcalloc(prog->len, sizeof(int), GFP_KERNEL);
-	if (ctx.offset == NULL)
-		return prog;
+	if (ctx.offset == NULL) {
+		prog = orig_prog;
+		goto out;
+	}
 
 	/* 1. Initial fake pass to compute ctx->idx. */
 
 	/* Fake pass to fill in ctx->offset and ctx->tmp_used. */
-	if (build_body(&ctx))
-		goto out;
+	if (build_body(&ctx)) {
+		prog = orig_prog;
+		goto out_off;
+	}
 
-	build_prologue(&ctx);
+	if (build_prologue(&ctx)) {
+		prog = orig_prog;
+		goto out_off;
+	}
 
 	ctx.epilogue_offset = ctx.idx;
 	build_epilogue(&ctx);
@@ -772,19 +904,26 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	image_size = sizeof(u32) * ctx.idx;
 	header = bpf_jit_binary_alloc(image_size, &image_ptr,
 				      sizeof(u32), jit_fill_hole);
-	if (header == NULL)
-		goto out;
+	if (header == NULL) {
+		prog = orig_prog;
+		goto out_off;
+	}
 
 	/* 2. Now, the actual pass. */
 
 	ctx.image = (u32 *)image_ptr;
 	ctx.idx = 0;
 
-	build_prologue(&ctx);
+	if (build_prologue(&ctx)) {
+		bpf_jit_binary_free(header);
+		prog = orig_prog;
+		goto out_off;
+	}
 
 	if (build_body(&ctx)) {
 		bpf_jit_binary_free(header);
-		goto out;
+		prog = orig_prog;
+		goto out_off;
 	}
 
 	build_epilogue(&ctx);
@@ -798,7 +937,12 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	set_memory_ro((unsigned long)header, header->pages);
 	prog->bpf_func = (void *)ctx.image;
 	prog->jited = 1;
-out:
+
+out_off:
 	kfree(ctx.offset);
+out:
+	if (tmp_blinded)
+		bpf_jit_prog_release_other(prog, prog == orig_prog ?
+					   tmp : orig_prog);
 	return prog;
 }

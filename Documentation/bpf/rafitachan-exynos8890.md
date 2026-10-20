@@ -28,8 +28,12 @@ do código-fonte. **Nada aqui foi compilado nem testado em hardware.**
   cgroup_sock_addr, cgroup_sockopt, kprobe, tracepoint, perf_event.
 - Helpers de rede usados pelo Android: `get_socket_cookie`, `get_socket_uid`,
   `ktime_get_boot_ns`, `skb_load_bytes(_relative)`, entre outros.
-- JIT ARM64 com blinding de constantes, imagem somente-leitura, offset aleatório
-  e `bpf_jit_limit`. Classic BPF e seccomp-BPF preservados.
+- JIT ARM64 com imagem somente-leitura, offset aleatório e `bpf_jit_limit`.
+  Classic BPF e seccomp-BPF preservados.
+- **Correção de uma afirmação anterior deste documento:** a API de blinding de
+  constantes (`bpf_jit_blind_constants`) existia em `kernel/bpf/core.c`, mas o JIT
+  ARM64 **não a chamava** e nenhum outro JIT da árvore a usa. Portanto
+  `net.core.bpf_jit_harden` não tinha efeito. Isso foi corrigido na etapa 2.
 
 ## 3. Alterações desta branch (`rafitachan-bpf-hardening`)
 
@@ -38,6 +42,17 @@ do código-fonte. **Nada aqui foi compilado nem testado em hardware.**
 | `kernel/bpf/syscall.c` | `BPF_BTF_LOAD` exige `CAP_SYS_ADMIN` (como o upstream 4.19) e valida o cabeçalho do blob BTF (magic, versão, flags, limites, ordem e alinhamento das seções, seção de strings terminada em NUL). Antes aceitava qualquer blob de até 16 MB sem privilégio. |
 | `kernel/bpf/hashtab.c` | `BPF_MAP_TYPE_DEVMAP_HASH` deixou de ser um hash genérico com outro nome: agora exige chave `u32` e valor `u32`, como no upstream. |
 | `include/uapi/linux/bpf.h` | Comentário de `BPF_PROG_TEST_RUN` corrigido: o comando **não** está implementado (retorna `-EINVAL`). |
+
+### Etapa 2 (branch `rafitachan-bpf-6.6-backport`): JIT ARM64
+
+| Arquivo | Mudança |
+|---|---|
+| `arch/arm64/net/bpf_jit_comp.c` | **Tail call** (`BPF_JMP\|BPF_TAIL_CALL`) implementado no JIT, espelhando o interpretador: índice convertido para u32, comparação sem sinal com `max_entries`, limite `MAX_TAIL_CALL_CNT`, `prog == NULL`, salto para `bpf_func + PROLOGUE_OFFSET`. O frame é compartilhado e o SP é restaurado antes do salto. |
+| `arch/arm64/net/bpf_jit_comp.c` | **Blinding de constantes** ligado: `bpf_int_jit_compile()` chama `bpf_jit_blind_constants()` e libera o clone com `bpf_jit_prog_release_other()`. `BPF_REG_AX` mapeado para `x9`; os registradores temporários do JIT foram movidos para `MAX_BPF_JIT_REG+n` porque `BPF_REG_AX == MAX_BPF_REG` colidia com `TMP_REG_1`. |
+| `arch/arm64/net/bpf_jit_comp.c` | Layout de frame idêntico para todos os programas (condição do tail call): os `push/pop` dos temporários `x23/x24` agora são incondicionais. `x26`, que já era salvo no frame sem uso, virou `tail_call_cnt`. Prólogo e bloco de tail call verificam o próprio tamanho e, se divergirem, o JIT falha e o programa cai no interpretador. |
+| `arch/arm64/net/bpf_jit.h` | Macro `A64_BR`. |
+
+Custo conhecido: um `push/pop` extra por programa JITado (sempre salva `x23/x24`).
 
 ## 4. O que NÃO está implementado (limitações honestas)
 
@@ -48,8 +63,9 @@ do código-fonte. **Nada aqui foi compilado nem testado em hardware.**
 - **Verificador**: faltam `BPF_JMP32`, chamadas bpf-to-bpf (`BPF_PSEUDO_CALL`) e
   a mitigação de Spectre v4 (`sanitize_ptr_alu`). Programas compilados para
   clang `-mcpu=v3` ou que usem subprogramas serão rejeitados.
-- **JIT ARM64**: sem tail call; programas com tail call caem no interpretador
-  (`bpf_check_tail_call` cuida da consistência).
+- **JIT ARM64**: tail call e blinding foram escritos **sem compilar nem testar**;
+  sem BPF-to-BPF calls, sem `BPF_JMP32`. O limite de pilha por tail call
+  encadeado é o mesmo do interpretador (`MAX_TAIL_CALL_CNT`).
 - Sem `BPF_MAP_TYPE_RINGBUF`, `BPF_F_MMAPABLE`, `clsact`, `BPF_PROG_TEST_RUN`.
   O loader do Android pula programas cujo `min_kver` é maior que o do kernel.
 - **Requisito do Android**: o `NetBpfLoad` do Android V (15) em diante aborta
@@ -59,6 +75,6 @@ do código-fonte. **Nada aqui foi compilado nem testado em hardware.**
 ## 5. Próximos passos sugeridos
 
 1. Compilar e capturar o log do `NetBpfLoad`/`netd` para ver a próxima falha real.
-2. Tail call no JIT ARM64 (a partir do upstream, com revisão cuidadosa).
+2. Testar o JIT: carregar um programa com tail call e outro com `bpf_jit_harden=2`.
 3. `sanitize_ptr_alu` e `BPF_JMP32` no verificador, só com testes em dispositivo.
 4. Parser BTF real, se algum programa exigir verificação por tipos.
