@@ -178,3 +178,59 @@ semântica concreta do interpretador em cerca de 20 milhões de pares aleatório
 resultado fora do tnum calculado. `git diff --check` limpo.
 
 NÃO TESTADO EM HARDWARE nem compilado como parte do kernel.
+
+## Android GSI boot: what the kernel can and cannot fix
+
+Findings from auditing the Android BPF loading path against this tree
+(sources: AOSP `packages/modules/Connectivity`: `netbpfload/NetBpfLoad.cpp`,
+`bpf/netd/BpfHandler.cpp`, `bpf_progs/netd.c`). Not tested on hardware.
+
+### Userspace version gates (independent of any kernel feature)
+
+The Android loaders compare the version reported by `uname` against a
+per-release minimum and refuse to continue below it:
+
+| Android | Minimum kernel enforced by loader |
+|---------|-----------------------------------|
+| 13 (T)  | 4.9                               |
+| 14 (U)  | 4.14                              |
+| 15 (V)  | 4.19                              |
+| 16      | 5.4 (the check is written for the "25Q2" platform level) |
+
+This kernel reports 3.18.140. Backporting BPF features cannot satisfy these
+checks, and this project does not fake the version string or patch
+userspace. Consequence: with an unmodified GSI, `netbpfload`/`bpfloader`
+logs the "requires kernel X" error and exits before loading any program,
+for all four releases. What init does next depends on the ROM's init.rc.
+The BPF work below only matters once that gate is dealt with outside the
+kernel by whoever builds the GSI.
+
+### Kernel-side gaps found and fixed
+
+* Helper IDs 4..8 differed from upstream (`probe_read`, `ktime_get_ns`,
+  `trace_printk`, `get_prandom_u32`, `get_smp_processor_id`). Fixed; the
+  remaining IDs were checked against the upstream table.
+* `net/core/filter.c`: skb-only helpers were reachable from CGROUP_SOCK,
+  CGROUP_SOCK_ADDR, CGROUP_SOCKOPT and XDP programs (wrong ctx type);
+  `trace_printk` fell through into `get_socket_cookie`;
+  SOCKET_FILTER lacked `skb_load_bytes`. Fixed via `bpf_base_func_proto()`.
+
+### Checked and found present
+
+BPF syscall commands used by the loader (map create/lookup/update/delete/
+get_next_key, prog load, obj pin/get with file_flags, prog attach/detach/
+query, *_GET_NEXT_ID, *_GET_FD_BY_ID, OBJ_GET_INFO_BY_FD), HASH/ARRAY and
+per-CPU/LRU/LPM/devmap map types, bpffs (mkdir, rename, mode=), cgroup
+attach for skb/sock/sock_addr/sockopt, `xt_bpf` pinned-object mode (rev 1),
+BPF_XADD (verifier, interpreter, ARM64 JIT), `__sk_buff` layout up to
+`gso_size`.
+
+### Known gaps, not yet addressed
+
+* `expected_attach_type` from `BPF_PROG_LOAD` is accepted but not stored or
+  validated (attach only checks prog type).
+* `struct bpf_sock` has only 6 fields (upstream has src/dst addr, ports,
+  state, ...). Programs gated to KVER >= 4.14 are skipped by the Android
+  loader on older kernels, so this is not a T-era blocker.
+* No ring buffer, `BPF_PROG_TEST_RUN`, `BPF_RAW_TRACEPOINT_OPEN`,
+  `BPF_MAP_LOOKUP_AND_DELETE_ELEM`.
