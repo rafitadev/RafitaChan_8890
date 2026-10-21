@@ -32,6 +32,13 @@ struct bpf_map_ops {
 	void *(*map_lookup_elem)(struct bpf_map *map, void *key);
 	int (*map_update_elem)(struct bpf_map *map, void *key, void *value, u64 flags);
 	int (*map_delete_elem)(struct bpf_map *map, void *key);
+	/* userspace only (BPF_MAP_LOOKUP_AND_DELETE_ELEM): atomically copy the
+	 * value out and remove the element. Called under rcu_read_lock().
+	 * For per-CPU maps @value has round_up(value_size, 8) bytes per
+	 * possible CPU. NULL means the map type does not support the command.
+	 */
+	int (*map_lookup_and_delete_elem)(struct bpf_map *map, void *key,
+					  void *value, u64 flags);
 
 	/* funcs called by prog_array and perf_event_array map */
 	void *(*map_fd_get_ptr)(struct bpf_map *map, struct file *map_file,

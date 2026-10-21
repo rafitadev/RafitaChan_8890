@@ -99,9 +99,10 @@ enum bpf_cmd {
 	 * this kernel is missing BPF_RAW_TRACEPOINT_OPEN (=17) in between.
 	 */
 	BPF_BTF_LOAD = 18,
-	/* ABI numbers 19..21 (BTF_GET_FD_BY_ID, TASK_FD_QUERY,
-	 * MAP_LOOKUP_AND_DELETE_ELEM) are not implemented in this kernel.
+	/* ABI numbers 19 and 20 (BTF_GET_FD_BY_ID, TASK_FD_QUERY) are not
+	 * implemented in this kernel.
 	 */
+	BPF_MAP_LOOKUP_AND_DELETE_ELEM = 21,
 	BPF_MAP_FREEZE = 22,
 };
 

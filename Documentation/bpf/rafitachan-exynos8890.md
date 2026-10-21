@@ -232,8 +232,8 @@ BPF_XADD (verifier, interpreter, ARM64 JIT), `__sk_buff` layout up to
 * `struct bpf_sock` has only 6 fields (upstream has src/dst addr, ports,
   state, ...). Programs gated to KVER >= 4.14 are skipped by the Android
   loader on older kernels, so this is not a T-era blocker.
-* No ring buffer, `BPF_PROG_TEST_RUN`, `BPF_RAW_TRACEPOINT_OPEN`,
-  `BPF_MAP_LOOKUP_AND_DELETE_ELEM`.
+* No ring buffer, `BPF_PROG_TEST_RUN`, `BPF_RAW_TRACEPOINT_OPEN`.
+  (`BPF_MAP_LOOKUP_AND_DELETE_ELEM` now exists for hash maps, see below.)
 
 ### CGROUP_SOCK_ADDR hardening and `expected_attach_type`
 
@@ -264,3 +264,17 @@ itself was **not** compiled and nothing was tested on hardware.
 
 Reminder: none of this lifts the userspace version gate described above. The
 Android `NetBpfLoad` still stops on a 3.18 `uname` before loading anything.
+
+### `BPF_MAP_LOOKUP_AND_DELETE_ELEM` (hash maps)
+
+| Arquivo | Mudança |
+|---|---|
+| `include/uapi/linux/bpf.h` | `BPF_MAP_LOOKUP_AND_DELETE_ELEM = 21` (número do ABI upstream). 19 e 20 continuam não implementados. |
+| `include/linux/bpf.h` | Novo `map_lookup_and_delete_elem` em `struct bpf_map_ops` (NULL = tipo não suporta). |
+| `kernel/bpf/hashtab.c` | Implementado para `HASH`, `LRU_HASH`, `PERCPU_HASH` e `LRU_PERCPU_HASH`. O valor é copiado com o lock do bucket seguro e o elemento é desligado e liberado na mesma seção crítica; duas chamadas concorrentes nunca devolvem o mesmo elemento. Por CPU: mesmo layout de `BPF_MAP_LOOKUP_ELEM` (`round_up(value_size, 8)` por CPU possível). Nos mapas LRU o nó volta à lista livre depois de soltar o lock, como em `htab_lru_map_delete_elem()`. |
+| `kernel/bpf/syscall.c` | `map_lookup_and_delete_elem()`: exige fd com leitura **e** escrita (`-EPERM`), mapa congelado devolve `-EPERM`, tipos sem suporte devolvem `-ENOTSUPP`, `flags != 0` devolve `-EINVAL` (não há `BPF_F_LOCK` aqui). Usa a mesma proteção `bpf_prog_active` do delete. |
+
+Não implementado: pilha/fila (os tipos não existem neste kernel), `lpm_trie`, `BPF_F_LOCK`.
+Impacto no boot do Android 17: não demonstrado; é paridade de UAPI com o Linux 6.6.
+Verificado só por leitura e compilação sintática em userspace do trecho novo do `hashtab.c`
+com stubs. Não compilado como parte do kernel, não testado em aparelho.

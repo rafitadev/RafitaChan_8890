@@ -1021,6 +1021,93 @@ static int htab_lru_map_delete_elem(struct bpf_map *map, void *key)
 	return ret;
 }
 
+/* Copy all per-CPU slots of @l into @value, round_up(value_size, 8) bytes per
+ * possible CPU: the same layout bpf_percpu_hash_copy() produces for
+ * BPF_MAP_LOOKUP_ELEM.
+ */
+static void htab_percpu_elem_copy_out(struct bpf_htab *htab,
+				      struct htab_elem *l, void *value)
+{
+	void __percpu *pptr = htab_elem_get_ptr(l, htab->map.key_size);
+	u32 size = round_up(htab->map.value_size, 8);
+	int cpu, off = 0;
+
+	for_each_possible_cpu(cpu) {
+		bpf_long_memcpy(value + off, per_cpu_ptr(pptr, cpu), size);
+		off += size;
+	}
+}
+
+/* Called from syscall (BPF_MAP_LOOKUP_AND_DELETE_ELEM) under rcu_read_lock().
+ * The value is copied while the bucket lock is held, so it is the value the
+ * element had at the moment it was unlinked and no concurrent update or
+ * delete can return the same element twice.
+ */
+static int __htab_map_lookup_and_delete_elem(struct bpf_map *map, void *key,
+					     void *value, u64 map_flags,
+					     bool is_lru_map)
+{
+	struct bpf_htab *htab = container_of(map, struct bpf_htab, map);
+	struct hlist_nulls_head *head;
+	struct bucket *b;
+	struct htab_elem *l;
+	unsigned long flags;
+	u32 hash, key_size;
+	int ret;
+
+	/* no flags are defined for this command in this kernel */
+	if (map_flags)
+		return -EINVAL;
+
+	WARN_ON_ONCE(!rcu_read_lock_held());
+
+	key_size = map->key_size;
+
+	hash = htab_map_hash(key, key_size);
+	b = __select_bucket(htab, hash);
+	head = &b->head;
+
+	raw_spin_lock_irqsave(&b->lock, flags);
+
+	l = lookup_elem_raw(head, hash, key, key_size);
+	if (!l) {
+		ret = -ENOENT;
+		goto out_unlock;
+	}
+
+	if (htab_is_percpu(htab))
+		htab_percpu_elem_copy_out(htab, l, value);
+	else
+		memcpy(value, l->key + round_up(key_size, 8), map->value_size);
+
+	hlist_nulls_del_rcu(&l->hash_node);
+	if (!is_lru_map)
+		free_htab_elem(htab, l);
+	ret = 0;
+
+out_unlock:
+	raw_spin_unlock_irqrestore(&b->lock, flags);
+
+	/* same order as htab_lru_map_delete_elem(): the LRU node is returned
+	 * to the free list after the bucket lock is dropped
+	 */
+	if (!ret && is_lru_map)
+		bpf_lru_push_free(&htab->lru, &l->lru_node);
+	return ret;
+}
+
+static int htab_map_lookup_and_delete_elem(struct bpf_map *map, void *key,
+					   void *value, u64 flags)
+{
+	return __htab_map_lookup_and_delete_elem(map, key, value, flags, false);
+}
+
+static int htab_lru_map_lookup_and_delete_elem(struct bpf_map *map, void *key,
+					       void *value, u64 flags)
+{
+	return __htab_map_lookup_and_delete_elem(map, key, value, flags, true);
+}
+
 static void delete_all_elements(struct bpf_htab *htab)
 {
 	int i;
@@ -1071,6 +1158,7 @@ static const struct bpf_map_ops htab_ops = {
 	.map_lookup_elem = htab_map_lookup_elem,
 	.map_update_elem = htab_map_update_elem,
 	.map_delete_elem = htab_map_delete_elem,
+	.map_lookup_and_delete_elem = htab_map_lookup_and_delete_elem,
 };
 
 static struct bpf_map_type_list htab_type __read_mostly = {
@@ -1085,6 +1173,7 @@ static const struct bpf_map_ops htab_lru_ops = {
 	.map_lookup_elem = htab_lru_map_lookup_elem,
 	.map_update_elem = htab_lru_map_update_elem,
 	.map_delete_elem = htab_lru_map_delete_elem,
+	.map_lookup_and_delete_elem = htab_lru_map_lookup_and_delete_elem,
 };
 
 static struct bpf_map_type_list htab_lru_type __read_mostly = {
@@ -1172,6 +1261,7 @@ static const struct bpf_map_ops htab_percpu_ops = {
 	.map_lookup_elem = htab_percpu_map_lookup_elem,
 	.map_update_elem = htab_percpu_map_update_elem,
 	.map_delete_elem = htab_map_delete_elem,
+	.map_lookup_and_delete_elem = htab_map_lookup_and_delete_elem,
 };
 
 static struct bpf_map_type_list htab_percpu_type __read_mostly = {
@@ -1186,6 +1276,7 @@ static const struct bpf_map_ops htab_lru_percpu_ops = {
 	.map_lookup_elem = htab_lru_percpu_map_lookup_elem,
 	.map_update_elem = htab_lru_percpu_map_update_elem,
 	.map_delete_elem = htab_lru_map_delete_elem,
+	.map_lookup_and_delete_elem = htab_lru_map_lookup_and_delete_elem,
 };
 
 static struct bpf_map_type_list htab_lru_percpu_type __read_mostly = {

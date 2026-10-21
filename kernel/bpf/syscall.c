@@ -551,6 +551,99 @@ err_put:
 	return err;
 }
 
+#define BPF_MAP_LOOKUP_AND_DELETE_ELEM_LAST_FIELD flags
+
+static int map_lookup_and_delete_elem(union bpf_attr *attr)
+{
+	void __user *ukey = u64_to_ptr(attr->key);
+	void __user *uvalue = u64_to_ptr(attr->value);
+	int ufd = attr->map_fd;
+	struct bpf_map *map;
+	void *key, *value;
+	u32 value_size;
+	struct fd f;
+	int err;
+
+	if (CHECK_ATTR(BPF_MAP_LOOKUP_AND_DELETE_ELEM) || attr->flags)
+		return -EINVAL;
+
+	f = fdget(ufd);
+	map = __bpf_map_get(f);
+	if (IS_ERR(map))
+		return PTR_ERR(map);
+
+	/* the command both reads and removes the element */
+	if (!(f.file->f_mode & FMODE_CAN_READ) ||
+	    !(f.file->f_mode & FMODE_CAN_WRITE)) {
+		err = -EPERM;
+		goto err_put;
+	}
+
+	if (!map->ops->map_lookup_and_delete_elem) {
+		err = -ENOTSUPP;
+		goto err_put;
+	}
+
+	err = -ENOMEM;
+	key = kmalloc(map->key_size, GFP_USER);
+	if (!key)
+		goto err_put;
+
+	err = -EFAULT;
+	if (copy_from_user(key, ukey, map->key_size) != 0)
+		goto free_key;
+
+	if (map->map_type == BPF_MAP_TYPE_PERCPU_HASH ||
+	    map->map_type == BPF_MAP_TYPE_LRU_PERCPU_HASH)
+		value_size = round_up(map->value_size, 8) * num_possible_cpus();
+	else
+		value_size = map->value_size;
+
+	err = -ENOMEM;
+	value = kmalloc(value_size, GFP_USER | __GFP_NOWARN);
+	if (!value)
+		goto free_key;
+
+	down_read(&map->freeze_sem);
+	if (READ_ONCE(map->frozen)) {
+		up_read(&map->freeze_sem);
+		err = -EPERM;
+		goto free_value;
+	}
+
+	/* same protection as map_delete_elem(): avoid kprobe+bpf recursion
+	 * into a map operation that holds a bucket lock
+	 */
+	preempt_disable();
+	__this_cpu_inc(bpf_prog_active);
+	rcu_read_lock();
+	err = map->ops->map_lookup_and_delete_elem(map, key, value, attr->flags);
+	rcu_read_unlock();
+	__this_cpu_dec(bpf_prog_active);
+	preempt_enable();
+	up_read(&map->freeze_sem);
+
+	if (err)
+		goto free_value;
+
+	/* the element is already gone: a faulting copy loses the value, as
+	 * with upstream
+	 */
+	err = -EFAULT;
+	if (copy_to_user(uvalue, value, value_size) != 0)
+		goto free_value;
+
+	err = 0;
+
+free_value:
+	kfree(value);
+free_key:
+	kfree(key);
+err_put:
+	fdput(f);
+	return err;
+}
+
 #define BPF_MAP_UPDATE_ELEM_LAST_FIELD flags
 
 static int map_update_elem(union bpf_attr *attr)
@@ -2029,6 +2122,9 @@ SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, siz
 		break;
 	case BPF_MAP_GET_NEXT_KEY:
 		err = map_get_next_key(&attr);
+		break;
+	case BPF_MAP_LOOKUP_AND_DELETE_ELEM:
+		err = map_lookup_and_delete_elem(&attr);
 		break;
 	case BPF_MAP_FREEZE:
 		err = map_freeze(&attr);
