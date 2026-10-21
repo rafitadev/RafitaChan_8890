@@ -2485,6 +2485,11 @@ static void reg_set_min_max(struct bpf_reg_state *true_reg,
 		 * true then we know for sure.
 		 */
 		true_reg->max_value = true_reg->min_value = val;
+		/* the equality path: the register is exactly val. Only done
+		 * for plain scalars, and never on the inequality path.
+		 */
+		if (true_reg->type == UNKNOWN_VALUE)
+			true_reg->var_off = tnum_const(val);
 		is_range = false;
 		break;
 	case BPF_JNE:
@@ -2492,6 +2497,9 @@ static void reg_set_min_max(struct bpf_reg_state *true_reg,
 		 * we know the value for sure;
 		 */
 		false_reg->max_value = false_reg->min_value = val;
+		/* JNE not taken: the register is exactly val */
+		if (false_reg->type == UNKNOWN_VALUE)
+			false_reg->var_off = tnum_const(val);
 		is_range = false;
 		break;
 	case BPF_JGT:
@@ -2564,6 +2572,11 @@ static void reg_set_min_max_inv(struct bpf_reg_state *true_reg,
 		 * true then we know for sure.
 		 */
 		true_reg->max_value = true_reg->min_value = val;
+		/* the equality path: the register is exactly val. Only done
+		 * for plain scalars, and never on the inequality path.
+		 */
+		if (true_reg->type == UNKNOWN_VALUE)
+			true_reg->var_off = tnum_const(val);
 		is_range = false;
 		break;
 	case BPF_JNE:
@@ -2571,6 +2584,9 @@ static void reg_set_min_max_inv(struct bpf_reg_state *true_reg,
 		 * we know the value for sure;
 		 */
 		false_reg->max_value = false_reg->min_value = val;
+		/* JNE not taken: the register is exactly val */
+		if (false_reg->type == UNKNOWN_VALUE)
+			false_reg->var_off = tnum_const(val);
 		is_range = false;
 		break;
 	case BPF_JGT:
@@ -3361,6 +3377,28 @@ static bool compare_ptrs_to_packet(struct bpf_reg_state *old,
  * whereas register type in current state is meaningful, it means that
  * the current state will reach 'bpf_exit' instruction safely
  */
+/* Exact register state comparison for pruning, ignoring var_off.
+ *
+ * var_off is tracked but not yet consulted by any verifier decision (it
+ * only describes bits of a scalar; bounds, pointer checks and map accesses
+ * still rely on min_value/max_value/imm/type). Letting it take part in the
+ * exact comparison would only make equivalent states look different and
+ * defeat pruning. Once var_off influences decisions, this must become a
+ * var_off-aware comparison (the old state's var_off must contain the
+ * current one, i.e. tnum_in(rold->var_off, rcur->var_off)).
+ */
+static bool reg_state_same_ignoring_var_off(const struct bpf_reg_state *a,
+					    const struct bpf_reg_state *b)
+{
+	struct bpf_reg_state ta, tb;
+
+	memcpy(&ta, a, sizeof(ta));
+	memcpy(&tb, b, sizeof(tb));
+	ta.var_off = tnum_unknown;
+	tb.var_off = tnum_unknown;
+	return memcmp(&ta, &tb, sizeof(ta)) == 0;
+}
+
 static bool states_equal(struct bpf_verifier_env *env,
 			 struct bpf_verifier_state *old,
 			 struct bpf_verifier_state *cur)
@@ -3373,7 +3411,7 @@ static bool states_equal(struct bpf_verifier_env *env,
 		rold = &old->regs[i];
 		rcur = &cur->regs[i];
 
-		if (memcmp(rold, rcur, sizeof(*rold)) == 0)
+		if (reg_state_same_ignoring_var_off(rold, rcur))
 			continue;
 
 		/* If the ranges were not the same, but everything else was and
@@ -3418,9 +3456,9 @@ static bool states_equal(struct bpf_verifier_env *env,
 			return false;
 		if (i % BPF_REG_SIZE)
 			continue;
-		if (memcmp(&old->spilled_regs[i / BPF_REG_SIZE],
-			   &cur->spilled_regs[i / BPF_REG_SIZE],
-			   sizeof(old->spilled_regs[0])))
+		if (!reg_state_same_ignoring_var_off(
+				&old->spilled_regs[i / BPF_REG_SIZE],
+				&cur->spilled_regs[i / BPF_REG_SIZE]))
 			/* when explored and current stack slot types are
 			 * the same, check that stored pointers types
 			 * are the same as well.
