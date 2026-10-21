@@ -148,3 +148,33 @@ Não compilado nem testado em hardware.
 | `kernel/bpf/syscall.c` | `map_freeze()`: exige `CAP_SYS_ADMIN`, irreversível, `-EBUSY` se já congelado. `map_update_elem`/`map_delete_elem` seguram `freeze_sem` para leitura e retornam `-EPERM` em mapa congelado; o congelamento toma o semáforo para escrita, então nenhuma atualização em andamento escapa. `frozen:` aparece no fdinfo. |
 
 Limitação: congelar só afeta a syscall. O acesso dos programas continua controlado por `BPF_F_RDONLY_PROG`; a otimização do upstream que trata leituras de mapa `RDONLY_PROG` congelado como constantes no verificador **não** foi portada. Não compilado nem testado em hardware.
+
+### Etapa 6 (branch `rafitachan-bpf-6.6-backport`): `var_off` (tnum) no verificador
+
+Referência upstream: `kernel/bpf/verifier.c` e `kernel/bpf/tnum.c` do Linux 6.6
+(`adjust_scalar_min_max_vals`, `reg_bounds_sync`). Este verificador continua no estilo
+4.9/4.13 (`CONST_IMM`/`UNKNOWN_VALUE` + `min_value`/`max_value`); não existe
+`__mark_reg_known()`.
+
+| Item | Estado |
+|---|---|
+| Campo `struct tnum var_off` em `bpf_reg_state`, inicializado como `tnum_unknown` | IMPLEMENTADO |
+| `tnum_const()` em `MOV imm` (ALU64 com extensão de sinal, ALU32 com extensão por zero), `LD_IMM64` (analisador) e `CONST_IMM += K/X` | IMPLEMENTADO |
+| Propagação em AND, OR, XOR, LSH, RSH, ARSH, ADD, SUB, MUL (imediato e registrador, ALU32 e ALU64), em `scalar_alu_var_off()` | IMPLEMENTADO |
+| Deslocamento por registrador | PARCIAL: só com quantidade conhecida e menor que a largura; senão `tnum_unknown` |
+| DIV, MOD, NEG, END | PARCIAL: resultado `tnum_unknown` (conservador) |
+| MOV32 de registrador (constante conhecida, ou `tnum_cast(src, 4)`) | IMPLEMENTADO |
+| JEQ/JNE: `var_off = tnum_const(val)` só no caminho de igualdade, só para `UNKNOWN_VALUE` | IMPLEMENTADO |
+| Refinamento por JGT/JGE/JLT/..., JSET, limites derivados do tnum, `u32_min/u32_max` | PENDENTE |
+| `states_equal()`: `var_off` **ignorado** na comparação exata (`reg_state_same_ignoring_var_off`) | IMPLEMENTADO |
+| Uso de `var_off` em decisões de segurança (acesso a mapa/pacote, alinhamento) | PENDENTE, deliberadamente: nada lê `var_off` ainda |
+
+Quando `var_off` passar a influenciar decisões, a comparação em `states_equal()` deve virar
+`tnum_in(rold->var_off, rcur->var_off)`.
+
+VERIFICADO ESTATICAMENTE (userspace, sem compilar o kernel): `tnum.c` e a função
+`scalar_alu_var_off()` extraída do `verifier.c` foram compilados juntos e comparados com a
+semântica concreta do interpretador em cerca de 20 milhões de pares aleatórios, sem nenhum
+resultado fora do tnum calculado. `git diff --check` limpo.
+
+NÃO TESTADO EM HARDWARE nem compilado como parte do kernel.
