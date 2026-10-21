@@ -2871,6 +2871,7 @@ static bool __is_valid_access(int off, int size, enum bpf_access_type type)
 
 static bool sk_filter_is_valid_access(int off, int size,
 				      enum bpf_access_type type,
+				      const struct bpf_prog *prog,
 				      enum bpf_reg_type *reg_type)
 {
 	switch (off) {
@@ -2900,6 +2901,7 @@ static bool sk_filter_is_valid_access(int off, int size,
 
 static bool sock_filter_is_valid_access(int off, int size,
 					enum bpf_access_type type,
+					const struct bpf_prog *prog,
 					enum bpf_reg_type *reg_type)
 {
 	if (type == BPF_WRITE) {
@@ -2962,6 +2964,7 @@ static int tc_cls_act_prologue(struct bpf_insn *insn_buf, bool direct_write,
 
 static bool tc_cls_act_is_valid_access(int off, int size,
 				       enum bpf_access_type type,
+				       const struct bpf_prog *prog,
 				       enum bpf_reg_type *reg_type)
 {
 	if (type == BPF_WRITE) {
@@ -3005,6 +3008,7 @@ static bool __is_valid_xdp_access(int off, int size,
 
 static bool xdp_is_valid_access(int off, int size,
 				enum bpf_access_type type,
+				const struct bpf_prog *prog,
 				enum bpf_reg_type *reg_type)
 {
 	if (type == BPF_WRITE)
@@ -3030,6 +3034,7 @@ EXPORT_SYMBOL_GPL(bpf_warn_invalid_xdp_action);
 
 static bool sock_addr_is_valid_access(int off, int size,
 				      enum bpf_access_type type,
+				      const struct bpf_prog *prog,
 				      enum bpf_reg_type *reg_type)
 {
 	return true;
@@ -3618,6 +3623,7 @@ cg_sockopt_func_proto(enum bpf_func_id func_id)
 
 static bool cg_sockopt_is_valid_access(int off, int size,
                                       enum bpf_access_type type,
+                                      const struct bpf_prog *prog,
                                       enum bpf_reg_type *reg_type)
 {
 	return true;
