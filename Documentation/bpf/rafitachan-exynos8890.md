@@ -101,11 +101,50 @@ aritmética de 32 bits só mantém limites sem overflow. O rastreamento de pacot
 (`find_good_pkt_pointers`) ainda só entende `JGT/JGE`, não `JLT/JLE`.
 **Nada disto foi compilado nem testado em aparelho.**
 
+### Etapa 4: BTF real (`kernel/bpf/btf.c`)
+
+Substitui o shim de BTF (que só olhava o cabeçalho e devolvia um fd). Base do
+formato e das regras: Linux 6.6.
+
+| Arquivo | Mudança |
+|---|---|
+| `include/uapi/linux/btf.h` (novo) | Formato BTF do 6.6: header, `struct btf_type`, os 18 `BTF_KIND_*` (INT, PTR, ARRAY, STRUCT, UNION, ENUM, FWD, TYPEDEF, VOLATILE, CONST, RESTRICT, FUNC, FUNC_PROTO, VAR, DATASEC, FLOAT, DECL_TAG, TYPE_TAG, ENUM64) e as estruturas de cada um. Exportado em `include/uapi/linux/Kbuild`. |
+| `include/linux/btf.h` (novo) | API interna. |
+| `include/uapi/linux/bpf.h` | `struct bpf_btf_info` (layout igual ao upstream). |
+| `kernel/bpf/btf.c` (novo) | Parser/validador completo, descrito abaixo. |
+| `kernel/bpf/syscall.c` | O shim foi removido. `BPF_BTF_LOAD` chama `btf_new_fd()`; `OBJ_GET_INFO_BY_FD` devolve o blob de verdade; `map_create` confere `btf_key/value_type_id` com `key_size/value_size`; `prog_load` valida `func_info`/`line_info`. |
+| `kernel/bpf/Makefile` | `btf.o`. |
+
+O que o `btf.c` valida:
+
+- **Cabeçalho e seções**: magic, versão, flags, `hdr_len` (múltiplo de 4; bytes extras de cabeçalho precisam ser zero), seções de tipos e strings sem sobreposição e cobrindo exatamente o blob, seção de strings com NUL no início e no fim.
+- **Passe 1 (metadados)**: regras por tipo, como no upstream. Bits reservados de `info`, nomes (identificador válido onde exigido; INT/FLOAT aceitam qualquer nome), `vlen`/`kind_flag`, tamanhos e codificação de INT, membros em ordem crescente de offset, uniões com offset 0, tamanho de ENUM (1/2/4/8), linkage de FUNC e VAR, datasec sem sobreposição, etc.
+- **Passe 2 (referências)**: todo `type_id` precisa existir; detecta **ciclos** (typedef/struct por valor), mas permite estruturas autorreferentes por ponteiro; calcula e memoriza o tamanho de cada tipo com checagem de overflow em arrays; membros precisam caber no struct (inclusive bitfields e o encoding legado de INT); `FUNC` aponta para `FUNC_PROTO`; parâmetros e retorno precisam ter tamanho (`...` só no último parâmetro); `DATASEC` só referencia `VAR` e cada entrada precisa ter o tamanho da variável; `DECL_TAG` confere o alvo e o `component_idx`.
+- **Limites**: 1M de tipos, 16 MB de blob, profundidade de resolução 32 (igual ao upstream).
+- **Log**: `btf_log_level/btf_log_buf` recebe mensagens de erro (`[id] motivo`). Diferença do upstream: não lista cada tipo.
+- **Permissão**: `CAP_SYS_ADMIN`.
+
+`func_info` aceita só 1 entrada (o próprio programa, `insn_off = 0`, tipo `FUNC`),
+porque este verificador não tem subprogramas. `line_info` exige `insn_off`
+crescente, dentro do programa, com offsets de string válidos.
+
+**Como foi verificado (e o que isso NÃO prova):** o `btf.c` real foi compilado
+em userspace com stubs das APIs do kernel (`-Wall -Wextra` sem avisos) e testado
+com 106 casos (blobs válidos e inválidos montados à mão, incluindo ciclos,
+overflow de array, profundidade, bitfields, datasec, decl_tag, round-trip do blob
+por `OBJ_GET_INFO_BY_FD`, checagem de mapa e de `func_info/line_info`) e com 600
+mil mutações aleatórias sob AddressSanitizer + UBSan, sem nenhum erro. Isso
+valida a lógica do parser. **Não** valida a integração com o kernel (fd, RCU,
+`copy_*_user` reais) nem a compilação com o seu toolchain, e o parser não foi
+testado com BTF gerado por clang.
+
 ## 4. O que NÃO está implementado (limitações honestas)
 
-- **BTF real**: o tipo de cada entrada não é interpretado. O shim existe só
-  para o `NetBpfLoad` não abortar. Programas que dependem de verificação por BTF
-  (funções globais, `func_info`) podem falhar no verificador.
+- **BTF**: há parser e validador reais (etapa 4), mas o **verificador não consome
+  BTF**: sem ponteiros tipados por BTF, sem funções globais verificadas por
+  `func_info`, sem CO-RE, sem BTF de vmlinux/módulos, sem `BTF_GET_FD_BY_ID` e sem
+  BTF anexado ao mapa (a referência é validada e solta). Programas que dependam
+  disso continuam sendo rejeitados pelo verificador.
 - **DEVMAP_HASH real**: sem `bpf_redirect_map` nele; é só um hash u32→u32.
 - **Verificador**: faltam chamadas bpf-to-bpf (`BPF_PSEUDO_CALL`), a mitigação de
   Spectre v4 (`sanitize_ptr_alu`) e o modelo completo de limites (`tnum` no
@@ -125,7 +164,7 @@ aritmética de 32 bits só mantém limites sem overflow. O rastreamento de pacot
 1. Compilar e capturar o log do `NetBpfLoad`/`netd` para ver a próxima falha real.
 2. Testar o JIT: carregar um programa com tail call e outro com `bpf_jit_harden=2`.
 3. `sanitize_ptr_alu` no verificador, só com testes em dispositivo.
-4. Parser BTF real, se algum programa exigir verificação por tipos.
+4. Consumir BTF no verificador (ponteiros tipados, funções globais), só se algum programa exigir.
 
 ### Etapa 4 (branch `rafitachan-bpf-android`): flags de acesso dos mapas
 

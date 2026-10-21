@@ -18,6 +18,7 @@
 #include <linux/file.h>
 #include <linux/license.h>
 #include <linux/filter.h>
+#include <linux/btf.h>
 #include <linux/version.h>
 #include <linux/idr.h>
 #include <linux/cred.h>
@@ -326,6 +327,31 @@ static int bpf_obj_name_cpy(char *dst, const char *src)
 }
 
 #define BPF_MAP_CREATE_LAST_FIELD btf_value_type_id /* PATCH: was map_name */
+
+/* Same contract as upstream map_check_btf(): if the caller names BTF key and
+ * value types, they must exist, have a size, and match key_size/value_size.
+ * The BTF reference is dropped right away: this kernel does not keep the BTF
+ * attached to the map (no map pretty-printing / BTF-aware map ops).
+ */
+static int map_check_btf_attr(const union bpf_attr *attr)
+{
+	struct btf *btf;
+	int err;
+
+	if (!attr->btf_key_type_id && !attr->btf_value_type_id)
+		return 0;
+	if (!attr->btf_value_type_id)
+		return -EINVAL;
+
+	btf = btf_get_by_fd(attr->btf_fd);
+	if (IS_ERR(btf))
+		return PTR_ERR(btf);
+	err = btf_check_map_kv(btf, attr->btf_key_type_id, attr->key_size,
+			       attr->btf_value_type_id, attr->value_size);
+	btf_put(btf);
+	return err;
+}
+
 /* called via syscall */
 static int map_create(union bpf_attr *attr)
 {
@@ -340,6 +366,10 @@ static int map_create(union bpf_attr *attr)
 	f_flags = bpf_get_file_flag(attr->map_flags);
 	if (f_flags < 0)
 		return f_flags;
+
+	err = map_check_btf_attr(attr);
+	if (err)
+		return err;
 
 	/* find map type and init map: hashtable vs rbtree vs bloom vs ... */
 	map = find_and_alloc_map(attr);
@@ -1243,6 +1273,13 @@ static int bpf_prog_load(union bpf_attr *attr)
 	if (bpf_prog_load_check_attach_type(type, attr->expected_attach_type))
 		return -EINVAL;
 
+	/* prog_btf_fd/func_info/line_info must be well formed. Checked before
+	 * any allocation so no cleanup is needed on failure.
+	 */
+	err = btf_check_prog_info(attr, attr->insn_cnt);
+	if (err)
+		return err;
+
 	/* plain bpf_prog allocation */
 	prog = bpf_prog_alloc(bpf_prog_size(attr->insn_cnt), GFP_USER);
 	if (!prog)
@@ -1818,198 +1855,16 @@ static int bpf_map_get_info_by_fd(struct bpf_map *map,
 	return 0;
 }
 
-/* ===================== PATCH: BTF minimal shim =====================
- * This device's kernel (3.18) has no BTF support at all. Modern
- * netbpfload/libbpf userspace unconditionally calls BPF_BTF_LOAD before
- * loading any program/map that references BTF, and treats EINVAL on that
- * call as fatal, aborting before it ever loads netd/tethering's real BPF
- * programs (see: /sys/fs/bpf/netd_shared, /sys/fs/bpf/net_shared never
- * getting created, and jniClatCoordinator/BandwidthController failing
- * later at runtime for the same underlying reason).
- *
- * This is a deliberate shortcut, NOT a real BTF implementation:
- *   - the BTF blob is copied into kernel memory and handed back an fd,
- *     but its contents are never parsed or type-checked.
- *   - BPF_MAP_CREATE / BPF_PROG_LOAD are updated (see LAST_FIELD changes
- *     above) to accept btf_fd/prog_btf_fd/func_info/line_info without
- *     validating them - maps and programs are created exactly as they
- *     would be without BTF.
- *   - No BTF-based verifier checks (global function calls via func_info,
- *     line info for verifier logs, etc.) are performed. If a program
- *     genuinely depends on BTF-verified global functions to pass the
- *     verifier, it may still fail to load - that is a different, later
- *     failure than the one this patch targets.
- *
- * Net effect: this exists purely to stop NetBpfLoad from bailing out at
- * the first BPF_BTF_LOAD call. Expect this to reveal the *next* failure
- * further down NetBpfLoad's object list - that is expected, not a sign
- * this patch is wrong. Capture a fresh log after flashing this and look
- * for the next EINVAL/lstat error, same as before.
- */
-
-#define BPF_BTF_MAX_SIZE (16 * 1024 * 1024) /* generous sanity ceiling */
-
-struct bpf_btf_min {
-	atomic_t	refcnt;
-	u32		data_size;
-	u32		id;
-	void		*data;
-};
-
-static atomic_t bpf_btf_min_id_gen = ATOMIC_INIT(0);
-
-static int bpf_btf_min_release(struct inode *inode, struct file *filp)
-{
-	struct bpf_btf_min *btf = filp->private_data;
-
-	if (atomic_dec_and_test(&btf->refcnt)) {
-		kvfree(btf->data);
-		kfree(btf);
-	}
-	return 0;
-}
-
-static const struct file_operations bpf_btf_fops = {
-	.release	= bpf_btf_min_release,
-	.read		= bpf_dummy_read,
-	.write		= bpf_dummy_write,
-};
-
-/* RafitaChan: structural validation of the BTF blob header.
- *
- * Mirrors the header rules enforced by the upstream 4.19 BTF loader
- * (magic, version, flags, section bounds/ordering/alignment, string
- * section NUL framing). The type section is still NOT parsed: this is a
- * sanity filter so that garbage is rejected with -EINVAL instead of being
- * accepted and handed back as a valid fd.
- */
-#define BPF_BTF_MAGIC		0xeB9F
-#define BPF_BTF_VERSION		1
-#define BPF_BTF_HDR_MIN_LEN	24
-
-struct bpf_btf_hdr_min {
-	__u16	magic;
-	__u8	version;
-	__u8	flags;
-	__u32	hdr_len;
-	__u32	type_off;
-	__u32	type_len;
-	__u32	str_off;
-	__u32	str_len;
-};
-
-static int bpf_btf_check_hdr(const void *data, u32 size)
-{
-	const struct bpf_btf_hdr_min *hdr = data;
-	const u8 *meta;
-	u32 meta_len;
-
-	if (size < BPF_BTF_HDR_MIN_LEN)
-		return -EINVAL;
-	if (hdr->magic != BPF_BTF_MAGIC || hdr->version != BPF_BTF_VERSION)
-		return -EINVAL;
-	if (hdr->flags)
-		return -EINVAL;
-	if (hdr->hdr_len < BPF_BTF_HDR_MIN_LEN || hdr->hdr_len >= size)
-		return -EINVAL;
-
-	meta = (const u8 *)data + hdr->hdr_len;
-	meta_len = size - hdr->hdr_len;
-
-	/* Offsets are relative to the end of the header. Each check is
-	 * written as len <= meta_len - off so that it cannot overflow.
-	 */
-	if (hdr->type_off > meta_len || hdr->type_len > meta_len - hdr->type_off)
-		return -EINVAL;
-	if (hdr->str_off > meta_len || hdr->str_len > meta_len - hdr->str_off)
-		return -EINVAL;
-	if (hdr->type_off & (sizeof(u32) - 1))
-		return -EINVAL;
-	/* type section must come before the string section, no overlap */
-	if (hdr->type_off + hdr->type_len > hdr->str_off)
-		return -EINVAL;
-	/* string section: non-empty, starts and ends with NUL */
-	if (!hdr->str_len)
-		return -EINVAL;
-	if (meta[hdr->str_off] != 0 || meta[hdr->str_off + hdr->str_len - 1] != 0)
-		return -EINVAL;
-
-	return 0;
-}
-
+/* BTF: the loader, validator and object management live in kernel/bpf/btf.c */
 #define BPF_BTF_LOAD_LAST_FIELD btf_log_level
 
 static int bpf_btf_load(union bpf_attr *attr)
 {
-	struct bpf_btf_min *btf;
-	void *data;
-	int fd;
-
 	if (CHECK_ATTR(BPF_BTF_LOAD))
 		return -EINVAL;
 
-	/* Upstream requires CAP_SYS_ADMIN for BTF load; this also stops
-	 * unprivileged callers from pinning up to 16 MB of vmalloc memory
-	 * per call (that memory is not charged to the memlock rlimit).
-	 */
-	if (!capable(CAP_SYS_ADMIN))
-		return -EPERM;
-
-	if (attr->btf_size == 0 || attr->btf_size > BPF_BTF_MAX_SIZE)
-		return -EINVAL;
-
-	/* kvzalloc() doesn't exist in this tree; vzalloc()/kvfree() do, and
-	 * kvfree() is explicitly documented to accept vmalloc'd pointers too.
-	 */
-	data = vzalloc(attr->btf_size);
-	if (!data)
-		return -ENOMEM;
-
-	if (copy_from_user(data, u64_to_ptr(attr->btf), attr->btf_size)) {
-		kvfree(data);
-		return -EFAULT;
-	}
-
-	/* Only the header is sanity-checked (see bpf_btf_check_hdr). The
-	 * type section is deliberately NOT parsed - see comment block above.
-	 */
-	if (bpf_btf_check_hdr(data, attr->btf_size)) {
-		kvfree(data);
-		return -EINVAL;
-	}
-
-	btf = kzalloc(sizeof(*btf), GFP_USER);
-	if (!btf) {
-		kvfree(data);
-		return -ENOMEM;
-	}
-	atomic_set(&btf->refcnt, 1);
-	btf->data = data;
-	btf->data_size = attr->btf_size;
-	btf->id = (u32)atomic_inc_return(&bpf_btf_min_id_gen);
-
-	/* No real log is produced; if the caller asked for one, hand back
-	 * an empty (zero-length) log rather than silently ignoring the
-	 * request, so a non-NULL/non-zero-size log_buf doesn't look stale.
-	 */
-	if (attr->btf_log_size && attr->btf_log_buf) {
-		char zero = 0;
-
-		if (put_user(zero, ((char __user *)u64_to_ptr(attr->btf_log_buf)))) {
-			kvfree(data);
-			kfree(btf);
-			return -EFAULT;
-		}
-	}
-
-	fd = anon_inode_getfd("bpf-btf", &bpf_btf_fops, btf, O_RDWR | O_CLOEXEC);
-	if (fd < 0) {
-		kvfree(data);
-		kfree(btf);
-	}
-	return fd;
+	return btf_new_fd(attr);
 }
-/* =================== end PATCH: BTF minimal shim =================== */
 
 #define BPF_OBJ_GET_INFO_BY_FD_LAST_FIELD info.info
 
@@ -2033,42 +1888,19 @@ static int bpf_obj_get_info_by_fd(const union bpf_attr *attr,
 	else if (f.file->f_op == &bpf_map_fops)
 		err = bpf_map_get_info_by_fd(f.file->private_data, attr,
 					     uattr);
-	else if (f.file->f_op == &bpf_btf_fops) {
-		/* PATCH: BTF minimal shim - struct bpf_btf_info layout,
-		 * matches upstream (btf ptr, btf_size, id). We deliberately do
-		 * NOT write into the caller-supplied 'btf' data pointer here:
-		 * we never validated it, and the caller already has its own
-		 * copy of the blob it originally sent to BPF_BTF_LOAD, so there
-		 * is nothing useful to copy back. We only report size/id.
+	else {
+		/* anything else must be a BTF fd; btf_get_by_fd() returns
+		 * -EINVAL for any other kind of file.
 		 */
-		struct bpf_btf_min *btf = f.file->private_data;
-		struct {
-			__aligned_u64 btf;
-			__u32 btf_size;
-			__u32 id;
-		} info = {};
-		u32 uinfo_len = attr->info.info_len;
-		u32 copy_len = min_t(u32, sizeof(info), uinfo_len);
-		void __user *uinfo = u64_to_ptr(attr->info.info);
+		struct btf *btf = btf_get_by_fd(ufd);
 
-		/* Read the caller's struct first (for forward/backward struct
-		 * size compatibility), then only overwrite the fields we
-		 * actually know about. 'btf' (the data pointer field) is left
-		 * exactly as the caller sent it - untouched, unused.
-		 */
-		if (copy_len && copy_from_user(&info, uinfo, copy_len)) {
-			err = -EFAULT;
+		if (IS_ERR(btf)) {
+			err = PTR_ERR(btf);
 		} else {
-			info.btf_size = btf->data_size;
-			info.id = btf->id;
-			if (copy_to_user(uinfo, &info, copy_len) ||
-			    put_user(sizeof(info), &uattr->info.info_len))
-				err = -EFAULT;
-			else
-				err = 0;
+			err = btf_get_info_by_fd(btf, attr, uattr);
+			btf_put(btf);
 		}
-	} else
-		err = -EINVAL;
+	}
 
 	fdput(f);
 	return err;
