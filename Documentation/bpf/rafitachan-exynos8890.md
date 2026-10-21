@@ -227,10 +227,40 @@ BPF_XADD (verifier, interpreter, ARM64 JIT), `__sk_buff` layout up to
 
 ### Known gaps, not yet addressed
 
-* `expected_attach_type` from `BPF_PROG_LOAD` is accepted but not stored or
-  validated (attach only checks prog type).
+* ~~`expected_attach_type` accepted but not stored or validated~~ — fixed, see
+  "CGROUP_SOCK_ADDR hardening" below.
 * `struct bpf_sock` has only 6 fields (upstream has src/dst addr, ports,
   state, ...). Programs gated to KVER >= 4.14 are skipped by the Android
   loader on older kernels, so this is not a T-era blocker.
 * No ring buffer, `BPF_PROG_TEST_RUN`, `BPF_RAW_TRACEPOINT_OPEN`,
   `BPF_MAP_LOOKUP_AND_DELETE_ELEM`.
+
+### CGROUP_SOCK_ADDR hardening and `expected_attach_type`
+
+Found while auditing the attach path (static reading, nothing compiled or run
+on a device):
+
+| Item | Before | Now |
+|---|---|---|
+| `expected_attach_type` | accepted, dropped | validated at load for CGROUP_SOCK (0 is mapped to `INET_SOCK_CREATE`), CGROUP_SOCK_ADDR and CGROUP_SOCKOPT; stored in `struct bpf_prog`; `BPF_PROG_ATTACH` requires a match (CGROUP_SKB only if the loader set one). Other program types are unchanged. |
+| `is_valid_access()` | no access to the program | takes `const struct bpf_prog *` (upstream 4.17 signature) |
+| `sock_addr_is_valid_access()` | `return true` for any offset/size/direction | 4-byte aligned accesses inside `struct bpf_sock_addr` only; `user_ip4`/`user_ip6` per v4/v6 attach type; `msg_src_ip4/6` only for UDP4/UDP6 sendmsg; writes only to `user_ip4/6`, `user_port`, `msg_src_ip4/6` |
+| `sock_addr_convert_ctx_access()` | 4-byte loads of 2-byte fields; IPv6 word index ignored | real field widths; `user_ip6[n]`/`msg_src_ip6[n]` hit word `n` |
+
+Why it mattered: `convert_ctx_accesses()` only rewrites 4/8-byte LDX/STX, so the
+old `return true` let 1/2-byte accesses reach `struct bpf_sock_addr_kern`
+unrewritten (privileged programs only, CAP_SYS_ADMIN), and `msg_src_ip*` read the
+NULL `t_ctx` outside UDP sendmsg.
+
+Limitations: no narrow (1/2-byte) reads of `user_ip4/6` and no 8-byte reads of the
+IPv6 words (upstream supports them through machinery this verifier lacks), so
+programs that do that are rejected. `GETPEERNAME/GETSOCKNAME/POST_BIND` attach
+types and `bpf_sock_addr.sk` do not exist in this tree.
+
+Checked: the new `sock_addr_is_valid_access()` was compiled in userspace against
+the real `struct bpf_sock_addr`/`enum bpf_attach_type` of this tree and every
+(attach type, offset, size, direction) combination was enumerated. The kernel
+itself was **not** compiled and nothing was tested on hardware.
+
+Reminder: none of this lifts the userspace version gate described above. The
+Android `NetBpfLoad` still stops on a 3.18 `uname` before loading anything.
