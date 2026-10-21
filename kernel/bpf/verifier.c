@@ -2029,9 +2029,8 @@ static bool reg_is_scalar(const struct bpf_reg_state *reg)
  * Only scalars have a meaningful var_off: if any operand is a pointer
  * (or anything else that is not CONST_IMM/UNKNOWN_VALUE), or the
  * operation is not tracked, nothing is known and tnum_unknown is returned.
- * Operations not handled here (MUL, DIV, MOD) must stay unknown until
- * they are implemented: the result must always be a superset of the
- * possible values.
+ * Operations not handled here (DIV, MOD) must stay unknown: the result
+ * must always be a superset of the possible values.
  *
  * ALU32 semantics: the operation works on the low 32 bits of the operands
  * and the result is zero-extended to 64 bits, so the operands are
@@ -2073,6 +2072,13 @@ static struct tnum scalar_alu_var_off(const struct bpf_reg_state *dst,
 		break;
 	case BPF_SUB:
 		res = tnum_sub(a, b);
+		break;
+	case BPF_MUL:
+		/* only the low bits of a product depend on the low bits of the
+		 * operands, so truncated ALU32 operands give a correct low
+		 * half, which is all that is kept below.
+		 */
+		res = tnum_mul(a, b);
 		break;
 	case BPF_AND:
 		res = tnum_and(a, b);
@@ -2206,6 +2212,7 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 					regs[insn->dst_reg].imm = v;
 					regs[insn->dst_reg].max_value = v;
 					regs[insn->dst_reg].min_value = v;
+					regs[insn->dst_reg].var_off = tnum_const(v);
 				} else if (reg_scalar_fits_bits(src, 32)) {
 					/* low 32 bits == whole value: copy state */
 					regs[insn->dst_reg] = *src;
@@ -2215,6 +2222,11 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 					 */
 					mark_reg_unknown_value(regs, insn->dst_reg);
 					regs[insn->dst_reg].imm = 32;
+					/* only the low 32 bits are copied */
+					regs[insn->dst_reg].var_off =
+						reg_is_scalar(src) ?
+						tnum_cast(src->var_off, 4) :
+						tnum_unknown;
 				}
 			}
 		} else {
