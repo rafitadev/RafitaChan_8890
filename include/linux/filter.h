@@ -434,7 +434,8 @@ struct bpf_prog {
 	u16			jited:1,	/* Is our filter JIT'ed? */
 				gpl_compatible:1, /* Is filter GPL compatible? */
 				cb_access:1,	/* Is control block accessed? */
-				dst_needed:1;	/* Do we need dst entry? */
+				dst_needed:1,	/* Do we need dst entry? */
+				enforce_expected_attach_type:1; /* Enforce expected_attach_type checking at attach time */
 	kmemcheck_bitfield_end(meta);
 	u32			len;		/* Number of filter blocks */
 	enum bpf_prog_type	type;		/* Type of BPF program */

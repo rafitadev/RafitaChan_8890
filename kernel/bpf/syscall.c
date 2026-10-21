@@ -1050,6 +1050,64 @@ struct bpf_prog *bpf_prog_get_type(u32 ufd, enum bpf_prog_type type)
 }
 EXPORT_SYMBOL_GPL(bpf_prog_get_type);
 
+/* Some userspace (older loaders) does not set expected_attach_type for
+ * program types where it later became mandatory. Fill in the only value that
+ * was valid before the field existed so that those programs keep loading.
+ */
+static void bpf_prog_load_fixup_attach_type(union bpf_attr *attr)
+{
+	switch (attr->prog_type) {
+	case BPF_PROG_TYPE_CGROUP_SOCK:
+		if (!attr->expected_attach_type)
+			attr->expected_attach_type = BPF_CGROUP_INET_SOCK_CREATE;
+		break;
+	default:
+		break;
+	}
+}
+
+/* Validate expected_attach_type at load time. Only the program types whose
+ * verifier-visible behaviour depends on the attach point are checked; every
+ * other type keeps accepting (and ignoring) the field as before.
+ */
+static int bpf_prog_load_check_attach_type(enum bpf_prog_type prog_type,
+					   enum bpf_attach_type attach_type)
+{
+	switch (prog_type) {
+	case BPF_PROG_TYPE_CGROUP_SOCK:
+		switch (attach_type) {
+		case BPF_CGROUP_INET_SOCK_CREATE:
+			return 0;
+		default:
+			return -EINVAL;
+		}
+	case BPF_PROG_TYPE_CGROUP_SOCK_ADDR:
+		switch (attach_type) {
+		case BPF_CGROUP_INET4_BIND:
+		case BPF_CGROUP_INET6_BIND:
+		case BPF_CGROUP_INET4_CONNECT:
+		case BPF_CGROUP_INET6_CONNECT:
+		case BPF_CGROUP_UDP4_SENDMSG:
+		case BPF_CGROUP_UDP6_SENDMSG:
+		case BPF_CGROUP_UDP4_RECVMSG:
+		case BPF_CGROUP_UDP6_RECVMSG:
+			return 0;
+		default:
+			return -EINVAL;
+		}
+	case BPF_PROG_TYPE_CGROUP_SOCKOPT:
+		switch (attach_type) {
+		case BPF_CGROUP_GETSOCKOPT:
+		case BPF_CGROUP_SETSOCKOPT:
+			return 0;
+		default:
+			return -EINVAL;
+		}
+	default:
+		return 0;
+	}
+}
+
 /* last field in 'union bpf_attr' used by this command */
 #define	BPF_PROG_LOAD_LAST_FIELD line_info_cnt /* PATCH: was expected_attach_type */
 
@@ -1088,10 +1146,18 @@ static int bpf_prog_load(union bpf_attr *attr)
 	    !capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
+	bpf_prog_load_fixup_attach_type(attr);
+	if (bpf_prog_load_check_attach_type(type, attr->expected_attach_type))
+		return -EINVAL;
+
 	/* plain bpf_prog allocation */
 	prog = bpf_prog_alloc(bpf_prog_size(attr->insn_cnt), GFP_USER);
 	if (!prog)
 		return -ENOMEM;
+
+	/* Remember the attach type the program was verified for. */
+	prog->expected_attach_type = attr->expected_attach_type;
+	prog->enforce_expected_attach_type = !!attr->expected_attach_type;
 
 	err = security_bpf_prog_alloc(prog->aux);
 	if (err)
@@ -1191,6 +1257,28 @@ static int bpf_obj_get(const union bpf_attr *attr)
 #define BPF_F_ATTACH_MASK \
 	(BPF_F_ALLOW_OVERRIDE | BPF_F_ALLOW_MULTI)
 
+/* The attach type must match what the program was loaded (and verified) for.
+ * CGROUP_SOCK_ADDR/SOCKOPT/SOCK always carry an expected_attach_type (see
+ * bpf_prog_load_fixup_attach_type()); CGROUP_SKB only enforces it when the
+ * loader supplied one, so loaders that leave it zero keep working.
+ */
+static int bpf_prog_attach_check_attach_type(const struct bpf_prog *prog,
+					     enum bpf_attach_type attach_type)
+{
+	switch (prog->type) {
+	case BPF_PROG_TYPE_CGROUP_SOCK:
+	case BPF_PROG_TYPE_CGROUP_SOCK_ADDR:
+	case BPF_PROG_TYPE_CGROUP_SOCKOPT:
+		return attach_type == prog->expected_attach_type ? 0 : -EINVAL;
+	case BPF_PROG_TYPE_CGROUP_SKB:
+		return prog->enforce_expected_attach_type &&
+		       prog->expected_attach_type != attach_type ?
+		       -EINVAL : 0;
+	default:
+		return 0;
+	}
+}
+
 static int bpf_prog_attach(const union bpf_attr *attr)
 {
 	struct bpf_prog *prog;
@@ -1214,6 +1302,12 @@ static int bpf_prog_attach(const union bpf_attr *attr)
 		if (IS_ERR(prog))
 			return PTR_ERR(prog);
 
+		ret = bpf_prog_attach_check_attach_type(prog, attr->attach_type);
+		if (ret) {
+			bpf_prog_put(prog);
+			return ret;
+		}
+
 		cgrp = cgroup_get_from_fd(attr->target_fd);
 		if (IS_ERR(cgrp)) {
 			bpf_prog_put(prog);
@@ -1231,6 +1325,12 @@ static int bpf_prog_attach(const union bpf_attr *attr)
 					 BPF_PROG_TYPE_CGROUP_SOCK);
 		if (IS_ERR(prog))
 			return PTR_ERR(prog);
+
+		ret = bpf_prog_attach_check_attach_type(prog, attr->attach_type);
+		if (ret) {
+			bpf_prog_put(prog);
+			return ret;
+		}
 
 		cgrp = cgroup_get_from_fd(attr->target_fd);
 		if (IS_ERR(cgrp)) {
@@ -1257,6 +1357,12 @@ static int bpf_prog_attach(const union bpf_attr *attr)
                 if (IS_ERR(prog))
                         return PTR_ERR(prog);
 
+		ret = bpf_prog_attach_check_attach_type(prog, attr->attach_type);
+		if (ret) {
+			bpf_prog_put(prog);
+			return ret;
+		}
+
                 cgrp = cgroup_get_from_fd(attr->target_fd);
                 if (IS_ERR(cgrp)) {
                         bpf_prog_put(prog);
@@ -1275,6 +1381,12 @@ static int bpf_prog_attach(const union bpf_attr *attr)
                                          BPF_PROG_TYPE_CGROUP_SOCKOPT);
                 if (IS_ERR(prog))
                         return PTR_ERR(prog);
+
+		ret = bpf_prog_attach_check_attach_type(prog, attr->attach_type);
+		if (ret) {
+			bpf_prog_put(prog);
+			return ret;
+		}
 
                 cgrp = cgroup_get_from_fd(attr->target_fd);
                 if (IS_ERR(cgrp)) {
