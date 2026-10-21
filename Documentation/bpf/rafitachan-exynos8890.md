@@ -138,3 +138,13 @@ aritmética de 32 bits só mantém limites sem overflow. O rastreamento de pacot
 | `kernel/bpf/syscall.c` | `BPF_OBJ_GET_INFO_BY_FD` deixou de mascarar `map_flags` por tipo de mapa (antes: 128 fixo para `DEVMAP_HASH`, 1 fixo para `LPM_TRIE`); agora devolve o valor real do mapa. |
 
 Não compilado nem testado em hardware.
+
+### Etapa 5 (branch `rafitachan-bpf-android`): `BPF_MAP_FREEZE`
+
+| Arquivo | Mudança |
+|---|---|
+| `include/uapi/linux/bpf.h` | `BPF_MAP_FREEZE = 22` (número do ABI upstream). Os números 19–21 continuam **não implementados**. |
+| `include/linux/bpf.h` | `bpf_map.frozen` e `bpf_map.freeze_sem`. |
+| `kernel/bpf/syscall.c` | `map_freeze()`: exige `CAP_SYS_ADMIN`, irreversível, `-EBUSY` se já congelado. `map_update_elem`/`map_delete_elem` seguram `freeze_sem` para leitura e retornam `-EPERM` em mapa congelado; o congelamento toma o semáforo para escrita, então nenhuma atualização em andamento escapa. `frozen:` aparece no fdinfo. |
+
+Limitação: congelar só afeta a syscall. O acesso dos programas continua controlado por `BPF_F_RDONLY_PROG`; a otimização do upstream que trata leituras de mapa `RDONLY_PROG` congelado como constantes no verificador **não** foi portada. Não compilado nem testado em hardware.

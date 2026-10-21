@@ -10,6 +10,7 @@
 #include <uapi/linux/bpf.h>
 
 #include <linux/workqueue.h>
+#include <linux/rwsem.h>
 #include <linux/file.h>
 #include <linux/percpu.h>
 #include <linux/err.h>
@@ -59,6 +60,13 @@ struct bpf_map {
 	u32 value_size;
 	u32 max_entries;
 	u32 map_flags;
+	/* BPF_MAP_FREEZE: once set, updates/deletes from the bpf() syscall are
+	 * refused. Writers from user space hold freeze_sem for reading, the
+	 * freeze operation takes it for writing so no update is in flight when
+	 * 'frozen' becomes visible. Programs are controlled by BPF_F_RDONLY_PROG.
+	 */
+	bool frozen;
+	struct rw_semaphore freeze_sem;
 	u32 pages;
 	u32 id;
 	bool unpriv_array;

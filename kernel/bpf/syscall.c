@@ -226,12 +226,14 @@ static void bpf_map_show_fdinfo(struct seq_file *m, struct file *filp)
                    "key_size:\t%u\n"
                    "value_size:\t%u\n"
                    "max_entries:\t%u\n"
-                   "map_flags:\t%#x\n",
+                   "map_flags:\t%#x\n"
+                   "frozen:\t%u\n",
                    map->map_type,
                    map->key_size,
                    map->value_size,
                    map->max_entries,
-                   map->map_flags);
+                   map->map_flags,
+                   READ_ONCE(map->frozen));
 }
 #endif
 
@@ -350,6 +352,7 @@ static int map_create(union bpf_attr *attr)
 
 	atomic_set(&map->refcnt, 1);
 	atomic_set(&map->usercnt, 1);
+	init_rwsem(&map->freeze_sem);
 
 	err = security_bpf_map_alloc(map);
 	if (err)
@@ -599,6 +602,13 @@ static int map_update_elem(union bpf_attr *attr)
 	if (copy_from_user(value, uvalue, value_size) != 0)
 		goto free_value;
 
+	down_read(&map->freeze_sem);
+	if (READ_ONCE(map->frozen)) {
+		up_read(&map->freeze_sem);
+		err = -EPERM;
+		goto free_value;
+	}
+
 	/* must increment bpf_prog_active to avoid kprobe+bpf triggering from
 	 * inside bpf map update or delete otherwise deadlocks are possible
 	 */
@@ -629,6 +639,7 @@ static int map_update_elem(union bpf_attr *attr)
 	}
 	__this_cpu_dec(bpf_prog_active);
 	preempt_enable();
+	up_read(&map->freeze_sem);
 
 free_value:
 	kfree(value);
@@ -672,6 +683,13 @@ static int map_delete_elem(union bpf_attr *attr)
 	if (copy_from_user(key, ukey, map->key_size) != 0)
 		goto free_key;
 
+	down_read(&map->freeze_sem);
+	if (READ_ONCE(map->frozen)) {
+		up_read(&map->freeze_sem);
+		err = -EPERM;
+		goto free_key;
+	}
+
 	preempt_disable();
 	__this_cpu_inc(bpf_prog_active);
 	rcu_read_lock();
@@ -679,9 +697,48 @@ static int map_delete_elem(union bpf_attr *attr)
 	rcu_read_unlock();
 	__this_cpu_dec(bpf_prog_active);
 	preempt_enable();
+	up_read(&map->freeze_sem);
 
 free_key:
 	kfree(key);
+err_put:
+	fdput(f);
+	return err;
+}
+
+#define BPF_MAP_FREEZE_LAST_FIELD map_fd
+
+/* Make a map immutable from the bpf() syscall side. Like upstream, freezing
+ * requires CAP_SYS_ADMIN and is not reversible. Freezing an already frozen
+ * map returns -EBUSY.
+ */
+static int map_freeze(const union bpf_attr *attr)
+{
+	int err = 0, ufd = attr->map_fd;
+	struct bpf_map *map;
+	struct fd f;
+
+	if (CHECK_ATTR(BPF_MAP_FREEZE))
+		return -EINVAL;
+
+	f = fdget(ufd);
+	map = __bpf_map_get(f);
+	if (IS_ERR(map))
+		return PTR_ERR(map);
+
+	if (!capable(CAP_SYS_ADMIN)) {
+		err = -EPERM;
+		goto err_put;
+	}
+
+	/* Waits for every in-flight syscall update/delete to finish. */
+	down_write(&map->freeze_sem);
+	if (map->frozen)
+		err = -EBUSY;
+	else
+		WRITE_ONCE(map->frozen, true);
+	up_write(&map->freeze_sem);
+
 err_put:
 	fdput(f);
 	return err;
@@ -1860,6 +1917,9 @@ SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, siz
 		break;
 	case BPF_MAP_GET_NEXT_KEY:
 		err = map_get_next_key(&attr);
+		break;
+	case BPF_MAP_FREEZE:
+		err = map_freeze(&attr);
 		break;
 	case BPF_PROG_LOAD:
 		err = bpf_prog_load(&attr);
