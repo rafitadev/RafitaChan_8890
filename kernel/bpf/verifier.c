@@ -15,6 +15,7 @@
 #include <linux/slab.h>
 #include <linux/bpf.h>
 #include <linux/bpf_verifier.h>
+#include <linux/tnum.h>
 #include <linux/filter.h>
 #include <net/netlink.h>
 #include <linux/file.h>
@@ -449,6 +450,7 @@ static void init_reg_state(struct bpf_reg_state *regs)
 		regs[i].imm = 0;
 		regs[i].min_value = BPF_REGISTER_MIN_RANGE;
 		regs[i].max_value = BPF_REGISTER_MAX_RANGE;
+		regs[i].var_off = tnum_unknown;
 	}
 
 	/* frame pointer */
@@ -463,6 +465,7 @@ static void __mark_reg_unknown_value(struct bpf_reg_state *regs, u32 regno)
 	regs[regno].type = UNKNOWN_VALUE;
 	regs[regno].id = 0;
 	regs[regno].imm = 0;
+	regs[regno].var_off = tnum_unknown;
 }
 
 static void mark_reg_unknown_value(struct bpf_reg_state *regs, u32 regno)
@@ -475,6 +478,8 @@ static void reset_reg_range_values(struct bpf_reg_state *regs, u32 regno)
 {
 	regs[regno].min_value = BPF_REGISTER_MIN_RANGE;
 	regs[regno].max_value = BPF_REGISTER_MAX_RANGE;
+	/* nothing is known about the bits of the new value */
+	regs[regno].var_off = tnum_unknown;
 }
 
 static void mark_reg_unknown_value_and_range(struct bpf_reg_state *regs,

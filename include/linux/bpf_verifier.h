@@ -9,6 +9,7 @@
 
 #include <linux/bpf.h> /* for enum bpf_reg_type */
 #include <linux/filter.h> /* for MAX_BPF_STACK */
+#include <linux/tnum.h> /* for struct tnum */
 
  /* Just some arbitrary values so we can safely do math without overflowing and
   * are obviously wrong for any sort of memory access.
@@ -35,9 +36,16 @@ struct bpf_reg_state {
 	};
 	u32 id;
 	/* Used to determine if any memory access using this register will
-	 * result in a bad access. These two fields must be last.
+	 * result in a bad access. These fields must be last.
 	 * See states_equal()
+	 *
+	 * var_off tracks which bits of the register value are known.
+	 * Groundwork for the Linux 6.6 bounds tracking backport: for now it
+	 * is only initialized (always tnum_unknown, i.e. "nothing known") and
+	 * carried along with the register state. It is NOT yet updated by
+	 * ALU/JMP handling and MUST NOT be used in verifier decisions.
 	 */
+	struct tnum var_off;
 	s64 min_value;
 	u64 max_value;
 	bool value_from_signed;
