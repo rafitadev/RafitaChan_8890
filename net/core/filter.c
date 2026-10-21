@@ -3032,11 +3032,86 @@ void bpf_warn_invalid_xdp_action(u32 act)
 }
 EXPORT_SYMBOL_GPL(bpf_warn_invalid_xdp_action);
 
+/* Context validation for CGROUP_SOCK_ADDR programs.
+ *
+ * Previously this returned true for every access. That let a program use
+ * any offset and any access size on its context pointer, which is really a
+ * struct bpf_sock_addr_kern: convert_ctx_accesses() only rewrites 4- and
+ * 8-byte LDX/STX, so 1- and 2-byte accesses were never rewritten and hit the
+ * kernel structure directly, and msg_src_ip4/6 (backed by t_ctx, which is
+ * NULL except for UDP sendmsg) could be read from any attach point.
+ *
+ * Accepted now:
+ *  - only naturally aligned 4-byte accesses, which is what
+ *    sock_addr_convert_ctx_access() implements (1/2-byte "narrow" access and
+ *    8-byte access to the IPv6 words are not supported by this verifier);
+ *  - user_ip4/user_ip6/msg_src_ip4/msg_src_ip6 only for the attach types
+ *    whose sockaddr / t_ctx actually has that layout;
+ *  - writes only to user_ip4, user_ip6, user_port, msg_src_ip4, msg_src_ip6.
+ */
 static bool sock_addr_is_valid_access(int off, int size,
 				      enum bpf_access_type type,
 				      const struct bpf_prog *prog,
 				      enum bpf_reg_type *reg_type)
 {
+	if (off < 0 || off >= sizeof(struct bpf_sock_addr))
+		return false;
+	if (size != sizeof(__u32) || off % sizeof(__u32))
+		return false;
+
+	/* Disallow IPv6 fields from IPv4 contexts and vice versa, and the
+	 * sendmsg-only fields from every other attach point.
+	 */
+	switch (off) {
+	case offsetof(struct bpf_sock_addr, user_ip4):
+		switch (prog->expected_attach_type) {
+		case BPF_CGROUP_INET4_BIND:
+		case BPF_CGROUP_INET4_CONNECT:
+		case BPF_CGROUP_UDP4_SENDMSG:
+		case BPF_CGROUP_UDP4_RECVMSG:
+			break;
+		default:
+			return false;
+		}
+		break;
+	case offsetof(struct bpf_sock_addr, user_ip6[0]) ...
+	     offsetofend(struct bpf_sock_addr, user_ip6[3]) - 1:
+		switch (prog->expected_attach_type) {
+		case BPF_CGROUP_INET6_BIND:
+		case BPF_CGROUP_INET6_CONNECT:
+		case BPF_CGROUP_UDP6_SENDMSG:
+		case BPF_CGROUP_UDP6_RECVMSG:
+			break;
+		default:
+			return false;
+		}
+		break;
+	case offsetof(struct bpf_sock_addr, msg_src_ip4):
+		if (prog->expected_attach_type != BPF_CGROUP_UDP4_SENDMSG)
+			return false;
+		break;
+	case offsetof(struct bpf_sock_addr, msg_src_ip6[0]) ...
+	     offsetofend(struct bpf_sock_addr, msg_src_ip6[3]) - 1:
+		if (prog->expected_attach_type != BPF_CGROUP_UDP6_SENDMSG)
+			return false;
+		break;
+	}
+
+	if (type == BPF_WRITE) {
+		switch (off) {
+		case offsetof(struct bpf_sock_addr, user_ip4):
+		case offsetof(struct bpf_sock_addr, user_ip6[0]) ...
+		     offsetofend(struct bpf_sock_addr, user_ip6[3]) - 1:
+		case offsetof(struct bpf_sock_addr, user_port):
+		case offsetof(struct bpf_sock_addr, msg_src_ip4):
+		case offsetof(struct bpf_sock_addr, msg_src_ip6[0]) ...
+		     offsetofend(struct bpf_sock_addr, msg_src_ip6[3]) - 1:
+			break;
+		default:
+			return false;
+		}
+	}
+
 	return true;
 }
 
