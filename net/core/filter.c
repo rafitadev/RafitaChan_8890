@@ -2611,12 +2611,16 @@ static const struct bpf_func_proto bpf_get_socket_uid_proto = {
 	.arg1_type      = ARG_PTR_TO_CTX,
 };
 
+/* Helpers that do not look at the program context at all, so they are safe
+ * for every program type. Context-specific helpers (anything taking a
+ * struct sk_buff *, an xdp_buff, ...) must NOT be reachable from here:
+ * program types whose context is not an skb (CGROUP_SOCK, CGROUP_SOCK_ADDR,
+ * CGROUP_SOCKOPT, XDP) fall back to this function only.
+ */
 static const struct bpf_func_proto *
-sk_filter_func_proto(enum bpf_func_id func_id)
+bpf_base_func_proto(enum bpf_func_id func_id)
 {
 	switch (func_id) {
-	case BPF_FUNC_skb_load_bytes_relative:
-		return &bpf_skb_load_bytes_relative_proto;
 	case BPF_FUNC_map_lookup_elem:
 		return &bpf_map_lookup_elem_proto;
 	case BPF_FUNC_map_update_elem:
@@ -2638,6 +2642,23 @@ sk_filter_func_proto(enum bpf_func_id func_id)
 	case BPF_FUNC_trace_printk:
 		if (capable(CAP_SYS_ADMIN))
 			return bpf_get_trace_printk_proto();
+		return NULL;
+	default:
+		return NULL;
+	}
+}
+
+/* Helpers for program types whose context is a struct __sk_buff
+ * (SOCKET_FILTER, CGROUP_SKB, and the default of SCHED_CLS/ACT).
+ */
+static const struct bpf_func_proto *
+sk_filter_func_proto(enum bpf_func_id func_id)
+{
+	switch (func_id) {
+	case BPF_FUNC_skb_load_bytes:
+		return &bpf_skb_load_bytes_proto;
+	case BPF_FUNC_skb_load_bytes_relative:
+		return &bpf_skb_load_bytes_relative_proto;
 	case BPF_FUNC_get_socket_cookie:
 		return &bpf_get_socket_cookie_proto;
 	case BPF_FUNC_get_socket_uid:
@@ -2645,7 +2666,7 @@ sk_filter_func_proto(enum bpf_func_id func_id)
 	case BPF_FUNC_get_current_uid_gid:
 		return &bpf_get_current_uid_gid_proto;
 	default:
-		return NULL;
+		return bpf_base_func_proto(func_id);
 	}
 }
 
@@ -2659,7 +2680,7 @@ sock_filter_func_proto(enum bpf_func_id func_id)
         case BPF_FUNC_get_current_uid_gid:
                 return &bpf_get_current_uid_gid_proto;
         default:
-                return sk_filter_func_proto(func_id);
+                return bpf_base_func_proto(func_id);
         }
 }
 
@@ -2745,7 +2766,7 @@ xdp_func_proto(enum bpf_func_id func_id)
 	case BPF_FUNC_get_smp_processor_id:
 		return &bpf_get_smp_processor_id_proto;
 	default:
-		return sk_filter_func_proto(func_id);
+		return bpf_base_func_proto(func_id);
 	}
 }
 
@@ -2807,7 +2828,7 @@ sock_addr_func_proto(enum bpf_func_id func_id)
         case BPF_FUNC_bind:
                 return &bpf_bind_proto;
         default:
-                return sk_filter_func_proto(func_id);
+                return bpf_base_func_proto(func_id);
         }
 }
 
@@ -3591,7 +3612,7 @@ cg_sockopt_func_proto(enum bpf_func_id func_id)
 		return &bpf_tcp_sock_proto;
 #endif
 	default:
-		return sk_filter_func_proto(func_id);
+		return bpf_base_func_proto(func_id);
 	}
 }
 
@@ -3687,7 +3708,7 @@ static const struct bpf_verifier_ops cg_skb_ops = {
 };
 
 static const struct bpf_verifier_ops cg_sock_ops = {
-	.get_func_proto		= sk_filter_func_proto,
+	.get_func_proto		= sock_filter_func_proto,
 	.is_valid_access	= sock_filter_is_valid_access,
 	.convert_ctx_access	= sock_filter_convert_ctx_access,
 };
