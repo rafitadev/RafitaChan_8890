@@ -2029,9 +2029,9 @@ static bool reg_is_scalar(const struct bpf_reg_state *reg)
  * Only scalars have a meaningful var_off: if any operand is a pointer
  * (or anything else that is not CONST_IMM/UNKNOWN_VALUE), or the
  * operation is not tracked, nothing is known and tnum_unknown is returned.
- * Operations not handled here (ADD, SUB, MUL, DIV, MOD) must stay unknown
- * until they are implemented: the result must always be a superset of
- * the possible values.
+ * Operations not handled here (MUL, DIV, MOD) must stay unknown until
+ * they are implemented: the result must always be a superset of the
+ * possible values.
  *
  * ALU32 semantics: the operation works on the low 32 bits of the operands
  * and the result is zero-extended to 64 bits, so the operands are
@@ -2065,6 +2065,15 @@ static struct tnum scalar_alu_var_off(const struct bpf_reg_state *dst,
 	}
 
 	switch (opcode) {
+	case BPF_ADD:
+		/* carries out of bit 63 (or 31 for ALU32) wrap around, which
+		 * is what tnum_add() models; ALU32 is truncated below.
+		 */
+		res = tnum_add(a, b);
+		break;
+	case BPF_SUB:
+		res = tnum_sub(a, b);
+		break;
 	case BPF_AND:
 		res = tnum_and(a, b);
 		break;
