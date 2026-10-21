@@ -523,6 +523,8 @@ out:
 	return ret;
 }
 
+#define LPM_CREATE_FLAG_MASK	(BPF_F_NO_PREALLOC | BPF_F_ACCESS_MASK)
+
 #define LPM_DATA_SIZE_MAX	256
 #define LPM_DATA_SIZE_MIN	1
 
@@ -545,7 +547,9 @@ static struct bpf_map *trie_alloc(union bpf_attr *attr)
 
 	/* check sanity of attributes */
 	if (attr->max_entries == 0 ||
-	    attr->map_flags != BPF_F_NO_PREALLOC ||
+	    !(attr->map_flags & BPF_F_NO_PREALLOC) ||
+	    attr->map_flags & ~LPM_CREATE_FLAG_MASK ||
+	    !bpf_map_flags_access_ok(attr->map_flags) ||
 	    attr->key_size < LPM_KEY_SIZE_MIN ||
 	    attr->key_size > LPM_KEY_SIZE_MAX ||
 	    attr->value_size < LPM_VAL_SIZE_MIN ||
@@ -561,6 +565,7 @@ static struct bpf_map *trie_alloc(union bpf_attr *attr)
 	trie->map.key_size = attr->key_size;
 	trie->map.value_size = attr->value_size;
 	trie->map.max_entries = attr->max_entries;
+	trie->map.map_flags = bpf_map_flags_retain_permanent(attr->map_flags);
 	trie->data_size = attr->key_size -
 			  offsetof(struct bpf_lpm_trie_key, data);
 	trie->max_prefixlen = trie->data_size * 8;

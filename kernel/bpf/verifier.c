@@ -676,6 +676,30 @@ static int check_map_access(struct bpf_verifier_env *env, u32 regno, int off,
 	return 0;
 }
 
+/* Enforce BPF_F_RDONLY_PROG / BPF_F_WRONLY_PROG for program-side accesses
+ * into a map value (direct loads/stores, xadd and helper memory arguments).
+ */
+static int check_map_access_type(struct bpf_verifier_env *env, u32 regno,
+				 int off, int size, enum bpf_access_type type)
+{
+	struct bpf_map *map = env->cur_state.regs[regno].map_ptr;
+	u32 cap = bpf_map_flags_to_cap(map);
+
+	if (type == BPF_WRITE && !(cap & BPF_MAP_CAN_WRITE)) {
+		verbose("write into map forbidden, value_size=%d off=%d size=%d\n",
+			map->value_size, off, size);
+		return -EACCES;
+	}
+
+	if (type == BPF_READ && !(cap & BPF_MAP_CAN_READ)) {
+		verbose("read from map forbidden, value_size=%d off=%d size=%d\n",
+			map->value_size, off, size);
+		return -EACCES;
+	}
+
+	return 0;
+}
+
 /* check read/write into an adjusted map element */
 static int check_map_access_adj(struct bpf_verifier_env *env, u32 regno,
 				int off, int size)
@@ -884,6 +908,10 @@ static int check_mem_access(struct bpf_verifier_env *env, int insn_idx, u32 regn
 			return -EACCES;
 		}
 
+		err = check_map_access_type(env, regno, off, size, t);
+		if (err)
+			return err;
+
 		if (reg->type == PTR_TO_MAP_VALUE_ADJ)
 			err = check_map_access_adj(env, regno, off, size);
 		else
@@ -1064,8 +1092,24 @@ static int check_helper_mem_access(struct bpf_verifier_env *env, int regno,
 	case PTR_TO_PACKET:
 		return check_packet_access(env, regno, 0, access_size);
 	case PTR_TO_MAP_VALUE:
+		{
+			int err = check_map_access_type(env, regno, 0, access_size,
+							meta && meta->raw_mode ?
+							BPF_WRITE : BPF_READ);
+
+			if (err)
+				return err;
+		}
 		return check_map_access(env, regno, 0, access_size);
 	case PTR_TO_MAP_VALUE_ADJ:
+		{
+			int err = check_map_access_type(env, regno, 0, access_size,
+							meta && meta->raw_mode ?
+							BPF_WRITE : BPF_READ);
+
+			if (err)
+				return err;
+		}
 		return check_map_access_adj(env, regno, 0, access_size);
 	default: /* const_imm|ptr_to_stack or invalid ptr */
 		return check_stack_boundary(env, regno, access_size,
@@ -1260,6 +1304,16 @@ static int check_map_func_compatibility(struct bpf_map *map, int func_id)
 {
 	if (!map)
 		return 0;
+
+	/* A map that is read-only from the program side must not be altered
+	 * through helpers either.
+	 */
+	if ((map->map_flags & BPF_F_RDONLY_PROG) &&
+	    (func_id == BPF_FUNC_map_delete_elem ||
+	     func_id == BPF_FUNC_map_update_elem)) {
+		verbose("write into map forbidden\n");
+		return -EACCES;
+	}
 
 	/* We need a two way check, first is from map perspective ... */
 	switch (map->map_type) {

@@ -274,6 +274,12 @@ int bpf_map_new_fd(struct bpf_map *map, int flags)
 				flags | O_CLOEXEC);
 }
 
+bool bpf_map_flags_access_ok(u32 access_flags)
+{
+	return (access_flags & (BPF_F_RDONLY_PROG | BPF_F_WRONLY_PROG)) !=
+	       (BPF_F_RDONLY_PROG | BPF_F_WRONLY_PROG);
+}
+
 int bpf_get_file_flag(int flags)
 {
 	if ((flags & BPF_F_RDONLY) && (flags & BPF_F_WRONLY))
@@ -1539,12 +1545,7 @@ static int bpf_map_get_info_by_fd(struct bpf_map *map,
 	info.key_size = map->key_size;
 	info.value_size = map->value_size;
 	info.max_entries = map->max_entries;
-	if (map->map_type == BPF_MAP_TYPE_DEVMAP_HASH)
-		info.map_flags = 128;
-	else if (map->map_type == BPF_MAP_TYPE_LPM_TRIE)
-		info.map_flags = 1;
-	else
-		info.map_flags = map->map_flags;
+	info.map_flags = map->map_flags;
 
 	memcpy(info.name, map->name, sizeof(map->name));
 

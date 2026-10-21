@@ -19,7 +19,7 @@
 #include "map_in_map.h"
 
 #define ARRAY_CREATE_FLAG_MASK \
-	(BPF_F_RDONLY | BPF_F_WRONLY)
+	(BPF_F_RDONLY | BPF_F_WRONLY | BPF_F_RDONLY_PROG | BPF_F_WRONLY_PROG)
 
 static void bpf_array_free_percpu(struct bpf_array *array)
 {
@@ -63,7 +63,8 @@ static struct bpf_map *array_map_alloc(union bpf_attr *attr)
 	/* check sanity of attributes */
 	if (attr->max_entries == 0 || attr->key_size != 4 ||
 	    attr->value_size == 0 ||
-	    attr->map_flags & ~ARRAY_CREATE_FLAG_MASK)
+	    attr->map_flags & ~ARRAY_CREATE_FLAG_MASK ||
+	    !bpf_map_flags_access_ok(attr->map_flags))
 		return ERR_PTR(-EINVAL);
 
 	if (attr->value_size > KMALLOC_MAX_SIZE)
@@ -128,7 +129,7 @@ static struct bpf_map *array_map_alloc(union bpf_attr *attr)
 	array->map.key_size = attr->key_size;
 	array->map.value_size = attr->value_size;
 	array->map.max_entries = attr->max_entries;
-	array->map.map_flags = attr->map_flags;
+	array->map.map_flags = bpf_map_flags_retain_permanent(attr->map_flags);
 	array->map.pages = cost;
 	array->elem_size = elem_size;
 

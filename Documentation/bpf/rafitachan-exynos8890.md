@@ -126,3 +126,15 @@ aritmética de 32 bits só mantém limites sem overflow. O rastreamento de pacot
 2. Testar o JIT: carregar um programa com tail call e outro com `bpf_jit_harden=2`.
 3. `sanitize_ptr_alu` no verificador, só com testes em dispositivo.
 4. Parser BTF real, se algum programa exigir verificação por tipos.
+
+### Etapa 4 (branch `rafitachan-bpf-android`): flags de acesso dos mapas
+
+| Arquivo | Mudança |
+|---|---|
+| `include/uapi/linux/bpf.h` | `BPF_F_RDONLY_PROG` (1<<7) e `BPF_F_WRONLY_PROG` (1<<8), com os mesmos valores do upstream. |
+| `include/linux/bpf.h` | `BPF_F_ACCESS_MASK`, `bpf_map_flags_to_cap()`, `bpf_map_flags_retain_permanent()`. |
+| `kernel/bpf/{arraymap,hashtab,lpm_trie,devmap}.c` | Aceitam e **guardam** as flags (antes `hashtab` rejeitava `BPF_F_RDONLY/WRONLY` e `lpm_trie` nem gravava `map_flags`). Combinar `RDONLY_PROG`+`WRONLY_PROG` retorna `-EINVAL`. Devmaps (inclusive o tipo de compatibilidade `DEVMAP_HASH`) passam a ser `RDONLY_PROG` implicitamente, como no upstream. |
+| `kernel/bpf/verifier.c` | `check_map_access_type()`: escrita em mapa `RDONLY_PROG` e leitura em `WRONLY_PROG` são rejeitadas (acesso direto, xadd e argumentos de helpers); `map_update_elem`/`map_delete_elem` rejeitados em mapa `RDONLY_PROG`. |
+| `kernel/bpf/syscall.c` | `BPF_OBJ_GET_INFO_BY_FD` deixou de mascarar `map_flags` por tipo de mapa (antes: 128 fixo para `DEVMAP_HASH`, 1 fixo para `LPM_TRIE`); agora devolve o valor real do mapa. |
+
+Não compilado nem testado em hardware.

@@ -19,6 +19,9 @@
 #include "map_in_map.h"
 
 #define HTAB_CREATE_FLAG_MASK						\
+	(BPF_F_NO_PREALLOC | BPF_F_NO_COMMON_LRU | BPF_F_ACCESS_MASK)
+
+#define HTAB_CREATE_FLAG_MASK						\
 	(BPF_F_NO_PREALLOC | BPF_F_RDONLY | BPF_F_WRONLY)
 
 struct bucket {
@@ -238,7 +241,8 @@ static struct bpf_map *htab_map_alloc(union bpf_attr *attr)
 		 */
 		return ERR_PTR(-EPERM);
 
-	if (attr->map_flags & ~(BPF_F_NO_PREALLOC | BPF_F_NO_COMMON_LRU))
+	if (attr->map_flags & ~HTAB_CREATE_FLAG_MASK ||
+	    !bpf_map_flags_access_ok(attr->map_flags))
 		/* reserved bits should not be used */
 		return ERR_PTR(-EINVAL);
 
@@ -257,7 +261,7 @@ static struct bpf_map *htab_map_alloc(union bpf_attr *attr)
 	htab->map.key_size = attr->key_size;
 	htab->map.value_size = attr->value_size;
 	htab->map.max_entries = attr->max_entries;
-	htab->map.map_flags = attr->map_flags;
+	htab->map.map_flags = bpf_map_flags_retain_permanent(attr->map_flags);
 
 	/* check sanity of attributes.
 	 * value_size == 0 may be allowed in the future to use map as a set
@@ -1308,6 +1312,11 @@ static struct bpf_map *devmap_hash_compat_alloc(union bpf_attr *attr)
 {
 	if (attr->key_size != sizeof(u32) || attr->value_size != sizeof(u32))
 		return ERR_PTR(-EINVAL);
+
+	/* As in upstream devmaps, lookups hand out a pointer straight to the
+	 * stored ifindex, so the program side must never write through it.
+	 */
+	attr->map_flags |= BPF_F_RDONLY_PROG;
 
 	return htab_map_alloc(attr);
 }

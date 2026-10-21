@@ -224,6 +224,14 @@ enum bpf_attach_type {
 #define BPF_F_RDONLY		(1U << 3)
 #define BPF_F_WRONLY		(1U << 4)
 
+/* Flags for accessing BPF map memory from the program side. Unlike
+ * BPF_F_RDONLY/BPF_F_WRONLY (which restrict the file descriptor handed to
+ * user space) these are permanent properties of the map: the verifier
+ * rejects program writes (RDONLY_PROG) or reads (WRONLY_PROG).
+ */
+#define BPF_F_RDONLY_PROG	(1U << 7)
+#define BPF_F_WRONLY_PROG	(1U << 8)
+
 /* flags for BPF_PROG_QUERY */
 #define BPF_F_QUERY_EFFECTIVE	(1U << 0)
 

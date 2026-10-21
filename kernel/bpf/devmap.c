@@ -43,6 +43,12 @@
 #include "bpf_lru_list.h"
 #include "map_in_map.h"
 
+/* RDONLY_PROG is implied for devmaps; accepting it explicitly keeps loaders
+ * that echo back the flags reported by map info working. WRONLY_PROG makes
+ * no sense for a map whose lookups are read-only and is rejected.
+ */
+#define DEV_CREATE_FLAG_MASK	(BPF_F_RDONLY | BPF_F_WRONLY | BPF_F_RDONLY_PROG)
+
 struct bpf_dtab_netdev {
 	struct net_device *dev;
 	int key;
@@ -63,7 +69,9 @@ static struct bpf_map *dev_map_alloc(union bpf_attr *attr)
 
 	/* check sanity of attributes */
 	if (attr->max_entries == 0 || attr->key_size != 4 ||
-	    attr->value_size != 4 || attr->map_flags)
+	    attr->value_size != 4 ||
+	    attr->map_flags & ~DEV_CREATE_FLAG_MASK ||
+	    !bpf_map_flags_access_ok(attr->map_flags))
 		return ERR_PTR(-EINVAL);
 
 	/* if value_size is bigger, the user space won't be able to
@@ -76,12 +84,17 @@ static struct bpf_map *dev_map_alloc(union bpf_attr *attr)
 	if (!dtab)
 		return ERR_PTR(-ENOMEM);
 
+	/* Lookups return a pointer straight to the stored ifindex, so keep the
+	 * value read-only from the program side (same as upstream).
+	 */
+	attr->map_flags |= BPF_F_RDONLY_PROG;
+
 	/* mandatory map attributes */
 	dtab->map.map_type = attr->map_type;
 	dtab->map.key_size = attr->key_size;
 	dtab->map.value_size = attr->value_size;
 	dtab->map.max_entries = attr->max_entries;
-	dtab->map.map_flags = attr->map_flags;
+	dtab->map.map_flags = bpf_map_flags_retain_permanent(attr->map_flags);
 
 	err = -ENOMEM;
 

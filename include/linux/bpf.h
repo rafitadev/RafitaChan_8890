@@ -38,6 +38,20 @@ struct bpf_map_ops {
 	void (*map_fd_put_ptr)(void *ptr);
 };
 
+#define BPF_F_ACCESS_MASK	(BPF_F_RDONLY | BPF_F_RDONLY_PROG | \
+				 BPF_F_WRONLY | BPF_F_WRONLY_PROG)
+
+#define BPF_MAP_CAN_READ	(1U << 0)
+#define BPF_MAP_CAN_WRITE	(1U << 1)
+
+/* RDONLY/WRONLY only restrict the user space fd, they are not a permanent
+ * attribute of the map and are not reported back in map info.
+ */
+static inline u32 bpf_map_flags_retain_permanent(u32 flags)
+{
+	return flags & ~(BPF_F_RDONLY | BPF_F_WRONLY);
+}
+
 struct bpf_map {
 	atomic_t refcnt;
 	enum bpf_map_type map_type;
@@ -59,6 +73,20 @@ struct bpf_map {
 	void *security;
 #endif
 };
+
+bool bpf_map_flags_access_ok(u32 access_flags);
+
+static inline u32 bpf_map_flags_to_cap(const struct bpf_map *map)
+{
+	u32 access_flags = map->map_flags & (BPF_F_RDONLY_PROG | BPF_F_WRONLY_PROG);
+
+	/* Both flags together are rejected at map creation. */
+	if (access_flags & BPF_F_RDONLY_PROG)
+		return BPF_MAP_CAN_READ;
+	else if (access_flags & BPF_F_WRONLY_PROG)
+		return BPF_MAP_CAN_WRITE;
+	return BPF_MAP_CAN_READ | BPF_MAP_CAN_WRITE;
+}
 
 struct bpf_map_type_list {
 	struct list_head list_node;
