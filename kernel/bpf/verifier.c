@@ -278,6 +278,10 @@ static const char *const bpf_jmp_string[16] = {
 	[BPF_JNE >> 4]  = "!=",
 	[BPF_JSGT >> 4] = "s>",
 	[BPF_JSGE >> 4] = "s>=",
+	[BPF_JLT >> 4]  = "<",
+	[BPF_JLE >> 4]  = "<=",
+	[BPF_JSLT >> 4] = "s<",
+	[BPF_JSLE >> 4] = "s<=",
 	[BPF_CALL >> 4] = "call",
 	[BPF_EXIT >> 4] = "exit",
 };
@@ -1765,16 +1769,60 @@ static void check_reg_overflow(struct bpf_reg_state *reg)
 		reg->min_value = BPF_REGISTER_MIN_RANGE;
 }
 
+/* Returns true if the 64-bit value held by scalar @reg is provably within
+ * [0, 2^@bits).  Only CONST_IMM and UNKNOWN_VALUE registers qualify; for
+ * every other type min_value/max_value/imm describe something else (access
+ * ranges, offsets) and say nothing about the register's numeric value.
+ * For UNKNOWN_VALUE the proof is either the tracked count of zero upper bits
+ * (imm) or a fully bounded [min_value, max_value] range; a range whose upper
+ * end sits at BPF_REGISTER_MAX_RANGE is the "unbounded" marker, not a proof.
+ * @bits must be 31 or 32.
+ */
+static bool reg_scalar_fits_bits(const struct bpf_reg_state *reg,
+				 unsigned int bits)
+{
+	const u64 limit = 1ULL << bits;
+
+	if (reg->type == CONST_IMM)
+		return reg->imm >= 0 && (u64)reg->imm < limit;
+	if (reg->type != UNKNOWN_VALUE)
+		return false;
+	if (reg->imm >= (s64)(64 - bits))
+		return true;
+	return reg->min_value >= 0 &&
+	       reg->max_value < BPF_REGISTER_MAX_RANGE &&
+	       reg->max_value < limit;
+}
+
+/* A 32-bit ALU instruction only reads the low 32 bits of its operands.  The
+ * tracked [min_value, max_value] range describes the full 64-bit register, so
+ * it may only be reused for the low 32 bits if the whole value fits in 32
+ * bits; otherwise the range must be dropped.
+ */
+static void coerce_reg_to_32(struct bpf_reg_state *reg)
+{
+	if (reg->type != CONST_IMM && reg->type != UNKNOWN_VALUE)
+		return;
+	if (reg_scalar_fits_bits(reg, 32))
+		return;
+	reg->min_value = BPF_REGISTER_MIN_RANGE;
+	reg->max_value = BPF_REGISTER_MAX_RANGE;
+	reg->value_from_signed = false;
+}
+
 static void adjust_reg_min_max_vals(struct bpf_verifier_env *env,
 				    struct bpf_insn *insn)
 {
 	struct bpf_reg_state *regs = env->cur_state.regs, *dst_reg;
+	const bool alu32 = BPF_CLASS(insn->code) != BPF_ALU64;
 	s64 min_val = BPF_REGISTER_MIN_RANGE;
 	u64 max_val = BPF_REGISTER_MAX_RANGE;
 	bool min_set = false, max_set = false;
 	u8 opcode = BPF_OP(insn->code);
 
 	dst_reg = &regs[insn->dst_reg];
+	if (alu32)
+		coerce_reg_to_32(dst_reg);
 	if (BPF_SRC(insn->code) == BPF_X) {
 		check_reg_overflow(&regs[insn->src_reg]);
 		min_val = regs[insn->src_reg].min_value;
@@ -1788,6 +1836,11 @@ static void adjust_reg_min_max_vals(struct bpf_verifier_env *env,
 		 */
 		if (regs[insn->src_reg].type != CONST_IMM &&
 		    regs[insn->src_reg].type != UNKNOWN_VALUE) {
+			min_val = BPF_REGISTER_MIN_RANGE;
+			max_val = BPF_REGISTER_MAX_RANGE;
+		}
+		/* 32-bit ops see only the low 32 bits of the source too */
+		if (alu32 && !reg_scalar_fits_bits(&regs[insn->src_reg], 32)) {
 			min_val = BPF_REGISTER_MIN_RANGE;
 			max_val = BPF_REGISTER_MAX_RANGE;
 		}
@@ -1899,6 +1952,14 @@ static void adjust_reg_min_max_vals(struct bpf_verifier_env *env,
 		break;
 	}
 
+	/* The ranges above were computed with 64-bit arithmetic.  A 32-bit
+	 * result wraps at 2^32 (e.g. 3 - 5), so it is only valid if the
+	 * result is fully bounded and non-negative; otherwise drop it.
+	 */
+	if (alu32 && (dst_reg->min_value < 0 ||
+		      dst_reg->max_value >= BPF_REGISTER_MAX_RANGE))
+		reset_reg_range_values(regs, insn->dst_reg);
+
 	check_reg_overflow(dst_reg);
 }
 
@@ -1907,6 +1968,7 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 {
 	struct bpf_reg_state *regs = env->cur_state.regs, *dst_reg;
 	u8 opcode = BPF_OP(insn->code);
+	bool dst_was_scalar = false;
 	int err;
 
 	if (opcode == BPF_END || opcode == BPF_NEG) {
@@ -1978,12 +2040,31 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 				 */
 				regs[insn->dst_reg] = regs[insn->src_reg];
 			} else {
+				struct bpf_reg_state *src = &regs[insn->src_reg];
+
 				if (is_pointer_value(env, insn->src_reg)) {
 					verbose("R%d partial copy of pointer\n",
 						insn->src_reg);
 					return -EACCES;
 				}
-				mark_reg_unknown_value(regs, insn->dst_reg);
+				if (src->type == CONST_IMM) {
+					/* w1 = w2, w2 known: exact result */
+					u64 v = (u32)src->imm;
+
+					regs[insn->dst_reg].type = CONST_IMM;
+					regs[insn->dst_reg].imm = v;
+					regs[insn->dst_reg].max_value = v;
+					regs[insn->dst_reg].min_value = v;
+				} else if (reg_scalar_fits_bits(src, 32)) {
+					/* low 32 bits == whole value: copy state */
+					regs[insn->dst_reg] = *src;
+				} else {
+					/* result is zero-extended: upper 32
+					 * bits are known to be zero
+					 */
+					mark_reg_unknown_value(regs, insn->dst_reg);
+					regs[insn->dst_reg].imm = 32;
+				}
 			}
 		} else {
 			/* case: R = imm
@@ -2057,6 +2138,12 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 			return err;
 
 		dst_reg = &regs[insn->dst_reg];
+
+		/* remember whether dst held a number (vs a pointer) before the
+		 * range adjustment, see the 32-bit ALU tail below
+		 */
+		dst_was_scalar = dst_reg->type == CONST_IMM ||
+				 dst_reg->type == UNKNOWN_VALUE;
 
 		/* first we want to adjust our ranges. */
 		adjust_reg_min_max_vals(env, insn);
@@ -2134,8 +2221,19 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 		    (dst_reg->type == PTR_TO_MAP_VALUE ||
 		     dst_reg->type == PTR_TO_MAP_VALUE_ADJ))
 			dst_reg->type = PTR_TO_MAP_VALUE_ADJ;
-		else
+		else {
 			mark_reg_unknown_value(regs, insn->dst_reg);
+			if (BPF_CLASS(insn->code) != BPF_ALU64) {
+				/* a 32-bit result is zero-extended */
+				dst_reg->imm = 32;
+				/* min/max of a pointer are access ranges, not
+				 * a value range: never keep them for a number
+				 */
+				if (!dst_was_scalar)
+					reset_reg_range_values(regs,
+							       insn->dst_reg);
+			}
+		}
 	}
 
 	return 0;
@@ -2399,23 +2497,147 @@ static void mark_map_regs(struct bpf_verifier_state *state, u32 regno,
 	}
 }
 
+/* Outcome of a JMP32 condition on two known 32-bit values: 1 taken, 0 not
+ * taken, -1 if @opcode is not a conditional jump this knows how to fold.
+ */
+static int jmp32_const_taken(u8 opcode, u32 a, u32 b)
+{
+	const s32 sa = a, sb = b;
+
+	switch (opcode) {
+	case BPF_JEQ:
+		return a == b;
+	case BPF_JNE:
+		return a != b;
+	case BPF_JGT:
+		return a > b;
+	case BPF_JGE:
+		return a >= b;
+	case BPF_JLT:
+		return a < b;
+	case BPF_JLE:
+		return a <= b;
+	case BPF_JSGT:
+		return sa > sb;
+	case BPF_JSGE:
+		return sa >= sb;
+	case BPF_JSLT:
+		return sa < sb;
+	case BPF_JSLE:
+		return sa <= sb;
+	case BPF_JSET:
+		return (a & b) != 0;
+	default:
+		return -1;
+	}
+}
+
+static bool jmp_opcode_is_signed(u8 opcode)
+{
+	return opcode == BPF_JSGT || opcode == BPF_JSGE ||
+	       opcode == BPF_JSLT || opcode == BPF_JSLE;
+}
+
+/* May the 64-bit bounds refinement be used for a JMP32 on @reg?  Only if the
+ * low 32 bits of @reg are its whole value, i.e. it fits in 32 bits (31 for
+ * signed compares, where bit 31 of the low word is the sign).  JSET gives no
+ * bounds in either width.
+ */
+static bool jmp32_refine_ok(const struct bpf_reg_state *reg, u8 opcode)
+{
+	if (opcode == BPF_JSET)
+		return false;
+	return reg_scalar_fits_bits(reg, jmp_opcode_is_signed(opcode) ? 31 : 32);
+}
+
+/* Constant operand as seen by the 64-bit refinement code.  A 64-bit compare
+ * against an imm sign-extends it; a JMP32 compare uses the low word: zero
+ * extended for unsigned ops, sign-extended from bit 31 for signed ops.
+ */
+static u64 jmp32_cmp_val(s64 val, u8 opcode, bool is_jmp32)
+{
+	if (!is_jmp32)
+		return val;
+	if (jmp_opcode_is_signed(opcode))
+		return (s64)(s32)val;
+	return (u32)val;
+}
+
+/* reg_set_min_max() knows JEQ/JNE/JGT/JGE/JSGT/JSGE.  The "less than" family
+ * is the negation of one of those: a < v is false exactly when a >= v is
+ * true, so swap the branch registers and use the opposite opcode.
+ */
+static void reg_set_min_max_cond(struct bpf_reg_state *true_reg,
+				 struct bpf_reg_state *false_reg, u64 val,
+				 u8 opcode)
+{
+	switch (opcode) {
+	case BPF_JLT:
+		reg_set_min_max(false_reg, true_reg, val, BPF_JGE);
+		break;
+	case BPF_JLE:
+		reg_set_min_max(false_reg, true_reg, val, BPF_JGT);
+		break;
+	case BPF_JSLT:
+		reg_set_min_max(false_reg, true_reg, val, BPF_JSGE);
+		break;
+	case BPF_JSLE:
+		reg_set_min_max(false_reg, true_reg, val, BPF_JSGT);
+		break;
+	default:
+		reg_set_min_max(true_reg, false_reg, val, opcode);
+		break;
+	}
+}
+
+/* Same for "const OP reg" (reg is the right-hand side): const < reg is
+ * reg > const, const <= reg is reg >= const.
+ */
+static void reg_set_min_max_inv_cond(struct bpf_reg_state *true_reg,
+				     struct bpf_reg_state *false_reg, u64 val,
+				     u8 opcode)
+{
+	switch (opcode) {
+	case BPF_JLT:
+		reg_set_min_max(true_reg, false_reg, val, BPF_JGT);
+		break;
+	case BPF_JLE:
+		reg_set_min_max(true_reg, false_reg, val, BPF_JGE);
+		break;
+	case BPF_JSLT:
+		reg_set_min_max(true_reg, false_reg, val, BPF_JSGT);
+		break;
+	case BPF_JSLE:
+		reg_set_min_max(true_reg, false_reg, val, BPF_JSGE);
+		break;
+	default:
+		reg_set_min_max_inv(true_reg, false_reg, val, opcode);
+		break;
+	}
+}
+
 static int check_cond_jmp_op(struct bpf_verifier_env *env,
 			     struct bpf_insn *insn, int *insn_idx)
 {
 	struct bpf_verifier_state *other_branch, *this_branch = &env->cur_state;
 	struct bpf_reg_state *regs = this_branch->regs, *dst_reg;
 	u8 opcode = BPF_OP(insn->code);
-	/* BPF_JMP32 compares only the low 32 bits. This verifier tracks 64-bit
-	 * register values, so for JMP32 it deliberately does NOT: fold the
-	 * branch, refine min/max bounds, prove a map pointer non-NULL, or
-	 * derive packet-range information. Both paths are always explored with
-	 * unmodified register state, which is conservative (it can only make
-	 * the verifier reject more programs, never accept an unsafe one).
+	/* BPF_JMP32 compares only the low 32 bits of its operands, while this
+	 * verifier tracks the whole 64-bit register.  A fact about the low 32
+	 * bits is never applied to the full register.  What is done for
+	 * JMP32:
+	 *  - both operands known constants: the outcome is computed exactly
+	 *    on the low 32 bits and only the taken path is followed;
+	 *  - dst (and a variable src) provably fit in 32 bits (31 for signed
+	 *    compares): low 32 bits == whole value, so the 64-bit bounds
+	 *    refinement is exactly equivalent and is reused;
+	 *  - otherwise both paths are explored with unmodified register state
+	 *    and no null-check / packet-range inference is made.
 	 */
 	const bool is_jmp32 = BPF_CLASS(insn->code) == BPF_JMP32;
 	int err;
 
-	if (opcode > BPF_EXIT) {
+	if (opcode > BPF_JSLE) {
 		verbose("invalid BPF_JMP opcode %x\n", opcode);
 		return -EINVAL;
 	}
@@ -2450,6 +2672,22 @@ static int check_cond_jmp_op(struct bpf_verifier_env *env,
 
 	dst_reg = &regs[insn->dst_reg];
 
+	/* JMP32 on two known constants: decide the branch on the low 32 bits */
+	if (is_jmp32 && dst_reg->type == CONST_IMM &&
+	    (BPF_SRC(insn->code) == BPF_K ||
+	     regs[insn->src_reg].type == CONST_IMM)) {
+		u32 a = (u32)dst_reg->imm;
+		u32 b = BPF_SRC(insn->code) == BPF_K ?
+			(u32)insn->imm : (u32)regs[insn->src_reg].imm;
+		int taken = jmp32_const_taken(opcode, a, b);
+
+		if (taken >= 0) {
+			if (taken)
+				*insn_idx += insn->off;
+			return 0;
+		}
+	}
+
 	/* detect if R == 0 where R was initialized to zero earlier */
 	if (!is_jmp32 && BPF_SRC(insn->code) == BPF_K &&
 	    (opcode == BPF_JEQ || opcode == BPF_JNE) &&
@@ -2476,20 +2714,29 @@ static int check_cond_jmp_op(struct bpf_verifier_env *env,
 	/* detect if we are comparing against a constant value so we can adjust
 	 * our min/max values for our dst register.
 	 */
-	if (is_jmp32) {
-		/* no bounds refinement for 32-bit comparisons, see above */
-	} else if (BPF_SRC(insn->code) == BPF_X) {
-		if (regs[insn->src_reg].type == CONST_IMM)
-			reg_set_min_max(&other_branch->regs[insn->dst_reg],
-					dst_reg, regs[insn->src_reg].imm,
-					opcode);
-		else if (dst_reg->type == CONST_IMM)
-			reg_set_min_max_inv(&other_branch->regs[insn->src_reg],
-					    &regs[insn->src_reg], dst_reg->imm,
-					    opcode);
-	} else {
-		reg_set_min_max(&other_branch->regs[insn->dst_reg],
-					dst_reg, insn->imm, opcode);
+	if (BPF_SRC(insn->code) == BPF_X) {
+		struct bpf_reg_state *src_reg = &regs[insn->src_reg];
+
+		if (src_reg->type == CONST_IMM &&
+		    (!is_jmp32 || jmp32_refine_ok(dst_reg, opcode))) {
+			reg_set_min_max_cond(&other_branch->regs[insn->dst_reg],
+					     dst_reg,
+					     jmp32_cmp_val(src_reg->imm, opcode,
+							   is_jmp32),
+					     opcode);
+		} else if (dst_reg->type == CONST_IMM &&
+			   (!is_jmp32 || jmp32_refine_ok(src_reg, opcode))) {
+			reg_set_min_max_inv_cond(&other_branch->regs[insn->src_reg],
+						 src_reg,
+						 jmp32_cmp_val(dst_reg->imm,
+							       opcode, is_jmp32),
+						 opcode);
+		}
+	} else if (!is_jmp32 || jmp32_refine_ok(dst_reg, opcode)) {
+		reg_set_min_max_cond(&other_branch->regs[insn->dst_reg],
+				     dst_reg,
+				     jmp32_cmp_val(insn->imm, opcode, is_jmp32),
+				     opcode);
 	}
 
 	/* detect if R == 0 where R is returned from bpf_map_lookup_elem() */
