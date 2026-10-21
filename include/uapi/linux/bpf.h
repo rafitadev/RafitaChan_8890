@@ -373,11 +373,16 @@ enum bpf_func_id {
 	BPF_FUNC_map_lookup_elem, /* void *map_lookup_elem(&map, &key) */
 	BPF_FUNC_map_update_elem, /* int map_update_elem(&map, &key, &value, flags) */
 	BPF_FUNC_map_delete_elem, /* int map_delete_elem(&map, &key) */
-	BPF_FUNC_get_prandom_u32, /* u32 prandom_u32(void) */
-	BPF_FUNC_get_smp_processor_id, /* u32 raw_smp_processor_id(void) */
-	BPF_FUNC_probe_read,      /* int bpf_probe_read(void *dst, int size, void *src) */
+	/* IDs 4..8 below are part of the stable uapi and MUST match upstream
+	 * Linux (probe_read=4 ... get_smp_processor_id=8): BPF programs are
+	 * compiled against those numbers (e.g. Android's bpf_helper_defs.h).
+	 * Do not reorder.
+	 */
+	BPF_FUNC_probe_read = 4,  /* int bpf_probe_read(void *dst, int size, void *src) */
 	BPF_FUNC_ktime_get_ns,    /* u64 bpf_ktime_get_ns(void) */
 	BPF_FUNC_trace_printk,    /* int bpf_trace_printk(const char *fmt, int fmt_size, ...) */
+	BPF_FUNC_get_prandom_u32, /* u32 prandom_u32(void) */
+	BPF_FUNC_get_smp_processor_id, /* u32 raw_smp_processor_id(void) */
 
 	/**
 	 * skb_store_bytes(skb, offset, from, len, flags) - store bytes into packet
