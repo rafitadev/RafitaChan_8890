@@ -2017,12 +2017,100 @@ static void adjust_reg_min_max_vals(struct bpf_verifier_env *env,
 	check_reg_overflow(dst_reg);
 }
 
+static bool reg_is_scalar(const struct bpf_reg_state *reg)
+{
+	return reg->type == CONST_IMM || reg->type == UNKNOWN_VALUE;
+}
+
+/* Compute what is known about the bits of dst_reg after the scalar ALU
+ * instruction @insn, from the var_off of its operands *before* the
+ * instruction executed. @src is only used for BPF_X.
+ *
+ * Only scalars have a meaningful var_off: if any operand is a pointer
+ * (or anything else that is not CONST_IMM/UNKNOWN_VALUE), or the
+ * operation is not tracked, nothing is known and tnum_unknown is returned.
+ * Operations not handled here (ADD, SUB, MUL, DIV, MOD) must stay unknown
+ * until they are implemented: the result must always be a superset of
+ * the possible values.
+ *
+ * ALU32 semantics: the operation works on the low 32 bits of the operands
+ * and the result is zero-extended to 64 bits, so the operands are
+ * truncated first and the result is truncated again.
+ */
+static struct tnum scalar_alu_var_off(const struct bpf_reg_state *dst,
+				      const struct bpf_reg_state *src,
+				      const struct bpf_insn *insn)
+{
+	bool alu32 = BPF_CLASS(insn->code) != BPF_ALU64;
+	u8 opcode = BPF_OP(insn->code);
+	struct tnum a, b, res;
+	u64 shift;
+
+	if (!reg_is_scalar(dst))
+		return tnum_unknown;
+	a = dst->var_off;
+	if (BPF_SRC(insn->code) == BPF_K) {
+		/* imm is sign-extended to 64 bits for ALU64; for ALU32 only
+		 * the low 32 bits are used and truncated below.
+		 */
+		b = tnum_const((u64)(s64)insn->imm);
+	} else {
+		if (!reg_is_scalar(src))
+			return tnum_unknown;
+		b = src->var_off;
+	}
+	if (alu32) {
+		a = tnum_cast(a, 4);
+		b = tnum_cast(b, 4);
+	}
+
+	switch (opcode) {
+	case BPF_AND:
+		res = tnum_and(a, b);
+		break;
+	case BPF_OR:
+		res = tnum_or(a, b);
+		break;
+	case BPF_XOR:
+		res = tnum_xor(a, b);
+		break;
+	case BPF_LSH:
+	case BPF_RSH:
+	case BPF_ARSH:
+		/* Only a known shift amount is tracked. Shifts by BPF_K
+		 * were range-checked by check_alu_op(); a register shift
+		 * amount that is unknown or out of range is not tracked.
+		 */
+		if (!tnum_is_const(b))
+			return tnum_unknown;
+		shift = b.value;
+		if (shift >= (alu32 ? 32 : 64))
+			return tnum_unknown;
+		if (opcode == BPF_LSH)
+			res = tnum_lshift(a, shift);
+		else if (opcode == BPF_RSH)
+			res = tnum_rshift(a, shift);
+		else if (alu32)
+			return tnum_unknown; /* rejected by check_alu_op() */
+		else
+			res = tnum_arshift(a, shift, 64);
+		break;
+	default:
+		return tnum_unknown;
+	}
+
+	if (alu32)
+		res = tnum_cast(res, 4);
+	return res;
+}
+
 /* check validity of 32-bit and 64-bit arithmetic operations */
 static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 {
 	struct bpf_reg_state *regs = env->cur_state.regs, *dst_reg;
 	u8 opcode = BPF_OP(insn->code);
 	bool dst_was_scalar = false;
+	struct tnum new_off;
 	int err;
 
 	if (opcode == BPF_END || opcode == BPF_NEG) {
@@ -2199,6 +2287,13 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 		dst_was_scalar = dst_reg->type == CONST_IMM ||
 				 dst_reg->type == UNKNOWN_VALUE;
 
+		/* what will be known about the bits of dst_reg if this ends up
+		 * being a scalar operation; computed from the operand state
+		 * before anything below modifies it.
+		 */
+		new_off = scalar_alu_var_off(dst_reg, &regs[insn->src_reg],
+					     insn);
+
 		/* first we want to adjust our ranges. */
 		adjust_reg_min_max_vals(env, insn);
 
@@ -2248,12 +2343,20 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 			   dst_reg->type == UNKNOWN_VALUE &&
 			   env->allow_ptr_leaks) {
 			/* unknown += K|X */
-			return evaluate_reg_alu(env, insn);
+			err = evaluate_reg_alu(env, insn);
+			dst_reg->var_off = new_off;
+			return err;
 		} else if (BPF_CLASS(insn->code) == BPF_ALU64 &&
 			   dst_reg->type == CONST_IMM &&
 			   env->allow_ptr_leaks) {
 			/* reg_imm += K|X */
-			return evaluate_reg_imm_alu(env, insn);
+			err = evaluate_reg_imm_alu(env, insn);
+			/* a CONST_IMM that stays CONST_IMM was updated by
+			 * evaluate_reg_imm_alu(); otherwise it became unknown.
+			 */
+			if (dst_reg->type != CONST_IMM)
+				dst_reg->var_off = new_off;
+			return err;
 		} else if (is_pointer_value(env, insn->dst_reg)) {
 			verbose("R%d pointer arithmetic prohibited\n",
 				insn->dst_reg);
@@ -2287,6 +2390,7 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 					reset_reg_range_values(regs,
 							       insn->dst_reg);
 			}
+			dst_reg->var_off = new_off;
 		}
 	}
 
