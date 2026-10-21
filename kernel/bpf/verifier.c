@@ -1452,6 +1452,7 @@ static int check_call(struct bpf_verifier_env *env, int func_id, int insn_idx)
 		reg = regs + caller_saved[i];
 		reg->type = NOT_INIT;
 		reg->imm = 0;
+		reg->var_off = tnum_unknown;
 	}
 
 	/* update return register */
@@ -1723,6 +1724,8 @@ static int evaluate_reg_imm_alu_unknown(struct bpf_verifier_env *env,
 	}
 
 	dst_reg->type = UNKNOWN_VALUE;
+	/* no longer a known constant */
+	dst_reg->var_off = tnum_unknown;
 	return 0;
 }
 
@@ -1740,13 +1743,16 @@ static int evaluate_reg_imm_alu(struct bpf_verifier_env *env,
 	/* dst_reg->type == CONST_IMM here, simulate execution of 'add' insn.
 	 * Don't care about overflow or negative values, just add them
 	 */
-	if (opcode == BPF_ADD && BPF_SRC(insn->code) == BPF_K)
+	if (opcode == BPF_ADD && BPF_SRC(insn->code) == BPF_K) {
 		dst_reg->imm += insn->imm;
-	else if (opcode == BPF_ADD && BPF_SRC(insn->code) == BPF_X &&
-		 src_reg->type == CONST_IMM)
+		dst_reg->var_off = tnum_const(dst_reg->imm);
+	} else if (opcode == BPF_ADD && BPF_SRC(insn->code) == BPF_X &&
+		   src_reg->type == CONST_IMM) {
 		dst_reg->imm += src_reg->imm;
-	else
+		dst_reg->var_off = tnum_const(dst_reg->imm);
+	} else {
 		mark_reg_unknown_value(regs, insn->dst_reg);
+	}
 	return 0;
 }
 
@@ -1994,6 +2000,7 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 			regs[insn->dst_reg].imm = imm;
 			regs[insn->dst_reg].max_value = imm;
 			regs[insn->dst_reg].min_value = imm;
+			regs[insn->dst_reg].var_off = tnum_const(imm);
 		}
 
 	} else if (opcode > BPF_END) {
@@ -2551,6 +2558,7 @@ static int check_ld_imm(struct bpf_verifier_env *env, struct bpf_insn *insn)
 
 		regs[insn->dst_reg].type = CONST_IMM;
 		regs[insn->dst_reg].imm = imm;
+		regs[insn->dst_reg].var_off = tnum_const(imm);
 		return 0;
 	}
 
@@ -2630,6 +2638,7 @@ static int check_ld_abs(struct bpf_verifier_env *env, struct bpf_insn *insn)
 		reg = regs + caller_saved[i];
 		reg->type = NOT_INIT;
 		reg->imm = 0;
+		reg->var_off = tnum_unknown;
 	}
 
 	/* mark destination R0 register as readable, since it contains
