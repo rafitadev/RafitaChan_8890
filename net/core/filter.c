@@ -3437,7 +3437,7 @@ static u32 sock_addr_convert_ctx_access(enum bpf_access_type type,
 	case offsetof(struct bpf_sock_addr, user_family):
                 *insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct bpf_sock_addr_kern, uaddr), dst_reg,
                                       src_reg, offsetof(struct bpf_sock_addr_kern, uaddr));
-                *insn++ = BPF_LDX_MEM(BPF_W, dst_reg, dst_reg, offsetof(struct sockaddr, sa_family));
+                *insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct sockaddr, sa_family), dst_reg, dst_reg, offsetof(struct sockaddr, sa_family));
 
 		break;
 
@@ -3472,11 +3472,11 @@ static u32 sock_addr_convert_ctx_access(enum bpf_access_type type,
                         *insn++ = BPF_STX_MEM(BPF_DW, dst_reg, tmp_reg, offsetof(struct bpf_sock_addr_kern, tmp_reg));
                         *insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct bpf_sock_addr_kern, uaddr), tmp_reg, dst_reg, offsetof(struct bpf_sock_addr_kern, uaddr));
                         *insn++ = BPF_STX_MEM(BPF_FIELD_SIZEOF(struct sockaddr_in6, sin6_addr.s6_addr32[0]), tmp_reg, src_reg,
-                                offsetof(struct sockaddr_in6, sin6_addr.s6_addr32[0]));
+                                offsetof(struct sockaddr_in6, sin6_addr.s6_addr32[0]) + off);
                         *insn++ = BPF_LDX_MEM(BPF_DW, tmp_reg, dst_reg, offsetof(struct bpf_sock_addr_kern, tmp_reg));
                 } else {
                         *insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct bpf_sock_addr_kern, uaddr), dst_reg, src_reg, offsetof(struct bpf_sock_addr_kern, uaddr));
-                        *insn++ = BPF_LDX_MEM(BPF_W, dst_reg, dst_reg, offsetof(struct sockaddr_in6, sin6_addr.s6_addr32[0]));
+                        *insn++ = BPF_LDX_MEM(BPF_W, dst_reg, dst_reg, offsetof(struct sockaddr_in6, sin6_addr.s6_addr32[0]) + off);
                 }
 		break;
 
@@ -3505,14 +3505,14 @@ static u32 sock_addr_convert_ctx_access(enum bpf_access_type type,
                         *insn++ = BPF_LDX_MEM(BPF_DW, tmp_reg, dst_reg, offsetof(struct bpf_sock_addr_kern, tmp_reg));
                 } else {
                         *insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct bpf_sock_addr_kern, uaddr), dst_reg, src_reg, offsetof(struct bpf_sock_addr_kern, uaddr));
-                        *insn++ = BPF_LDX_MEM(BPF_W, dst_reg, dst_reg, offsetof(struct sockaddr_in6, sin6_port));
+                        *insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct sockaddr_in6, sin6_port), dst_reg, dst_reg, offsetof(struct sockaddr_in6, sin6_port));
                 }
 
 		break;
 
 	case offsetof(struct bpf_sock_addr, family):
                 *insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct bpf_sock_addr_kern, sk), dst_reg, src_reg, offsetof(struct bpf_sock_addr_kern, sk));
-                *insn++ = BPF_LDX_MEM(BPF_W, dst_reg, dst_reg, offsetof(struct sock, sk_family));
+                *insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct sock, sk_family), dst_reg, dst_reg, offsetof(struct sock, sk_family));
 
 		break;
 
@@ -3564,11 +3564,11 @@ static u32 sock_addr_convert_ctx_access(enum bpf_access_type type,
                                 --tmp_reg;
                         *insn++ = BPF_STX_MEM(BPF_DW, dst_reg, tmp_reg, offsetof(struct bpf_sock_addr_kern, t_ctx));
                         *insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct bpf_sock_addr_kern, t_ctx), tmp_reg, dst_reg, offsetof(struct bpf_sock_addr_kern, t_ctx));
-                        *insn++ = BPF_STX_MEM(BPF_FIELD_SIZEOF(struct in6_addr, s6_addr32[0]), tmp_reg, src_reg, offsetof(struct in6_addr, s6_addr32[0]));
+                        *insn++ = BPF_STX_MEM(BPF_FIELD_SIZEOF(struct in6_addr, s6_addr32[0]), tmp_reg, src_reg, offsetof(struct in6_addr, s6_addr32[0]) + off);
                         *insn++ = BPF_LDX_MEM(BPF_DW, tmp_reg, dst_reg, offsetof(struct bpf_sock_addr_kern, tmp_reg));
                 } else {
                         *insn++ = BPF_LDX_MEM(BPF_FIELD_SIZEOF(struct bpf_sock_addr_kern, t_ctx), dst_reg, src_reg, offsetof(struct bpf_sock_addr_kern, t_ctx));
-                        *insn++ = BPF_LDX_MEM(BPF_W, dst_reg, dst_reg, offsetof(struct in6_addr, s6_addr32[0]));
+                        *insn++ = BPF_LDX_MEM(BPF_W, dst_reg, dst_reg, offsetof(struct in6_addr, s6_addr32[0]) + off);
                 }
 		break;
 	}
