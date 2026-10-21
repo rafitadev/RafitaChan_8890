@@ -2907,6 +2907,8 @@ static bool sock_filter_is_valid_access(int off, int size,
 	if (type == BPF_WRITE) {
 		switch (off) {
 		case offsetof(struct bpf_sock, bound_dev_if):
+		case offsetof(struct bpf_sock, mark):
+		case offsetof(struct bpf_sock, priority):
 			break;
 		default:
 			return false;
@@ -2919,6 +2921,15 @@ static bool sock_filter_is_valid_access(int off, int size,
 	/* The verifier guarantees that size > 0. */
 	if (off % size != 0)
 		return false;
+
+	/* convert_ctx_access() emits full 32-bit accesses for the fields
+	 * below, so narrow loads/stores would not mean what the program wrote.
+	 */
+	if (type == BPF_WRITE ||
+	    off == offsetof(struct bpf_sock, mark) ||
+	    off == offsetof(struct bpf_sock, priority))
+		if (size != sizeof(__u32))
+			return false;
 
 	return true;
 }
@@ -3329,6 +3340,28 @@ static u32 sock_filter_convert_ctx_access(enum bpf_access_type type,
 		else
 			*insn++ = BPF_LDX_MEM(BPF_W, dst_reg, src_reg,
 				      offsetof(struct sock, sk_bound_dev_if));
+		break;
+
+	case offsetof(struct bpf_sock, mark):
+		BUILD_BUG_ON(FIELD_SIZEOF(struct sock, sk_mark) != 4);
+
+		if (type == BPF_WRITE)
+			*insn++ = BPF_STX_MEM(BPF_W, dst_reg, src_reg,
+					      offsetof(struct sock, sk_mark));
+		else
+			*insn++ = BPF_LDX_MEM(BPF_W, dst_reg, src_reg,
+					      offsetof(struct sock, sk_mark));
+		break;
+
+	case offsetof(struct bpf_sock, priority):
+		BUILD_BUG_ON(FIELD_SIZEOF(struct sock, sk_priority) != 4);
+
+		if (type == BPF_WRITE)
+			*insn++ = BPF_STX_MEM(BPF_W, dst_reg, src_reg,
+					      offsetof(struct sock, sk_priority));
+		else
+			*insn++ = BPF_LDX_MEM(BPF_W, dst_reg, src_reg,
+					      offsetof(struct sock, sk_priority));
 		break;
 
 	case offsetof(struct bpf_sock, family):
